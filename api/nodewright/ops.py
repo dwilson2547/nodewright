@@ -429,6 +429,52 @@ def relayout(node_ids: list[str] | None, direction: str = "TB"):
     return op
 
 
+def insert(fragment: dict, x: int | None = None, y: int | None = None):
+    """Op: paste a template's nodes and edges with fresh ids, its top-left at
+    (x, y), or to the right of the existing drawing when x/y are omitted.
+    Groups go to the back so they render beneath everything."""
+
+    def op(data: dict) -> dict:
+        from . import templates
+        taken = {n["id"] for n in data["nodes"]} | {e["id"] for e in data["edges"]}
+        if x is None or y is None:
+            bb = _bbox(data["nodes"])
+            ox, oy = (0, 0) if bb is None else (snap(bb[2] + RANK_GAP * 2), snap(bb[1]))
+        else:
+            ox, oy = int(x), int(y)
+        doc = templates.instantiate(fragment, ox, oy, taken)
+        groups = [n for n in doc["nodes"] if n["type"] == "group"]
+        others = [n for n in doc["nodes"] if n["type"] != "group"]
+        data["nodes"] = groups + data["nodes"] + others
+        data["edges"] = data["edges"] + doc["edges"]
+        return {"node_ids": [n["id"] for n in doc["nodes"]],
+                "edge_ids": [e["id"] for e in doc["edges"]], "at": [ox, oy]}
+
+    return op
+
+
+def extract(data: dict, node_ids: list[str]) -> dict:
+    """The chosen nodes (plus the contents of chosen groups) and the edges
+    between them, as a standalone document."""
+    by_id = {n["id"]: n for n in data["nodes"]}
+    unknown = set(node_ids) - set(by_id)
+    if unknown:
+        raise OpError(f"no such nodes: {sorted(unknown)[:10]}")
+    parent = containment(data["nodes"])
+    chosen = set(node_ids)
+    changed = True
+    while changed:
+        changed = False
+        for c, g in parent.items():
+            if g in chosen and c not in chosen:
+                chosen.add(c)
+                changed = True
+    nodes = [copy.deepcopy(n) for n in data["nodes"] if n["id"] in chosen]
+    edges = [copy.deepcopy(e) for e in data["edges"]
+             if e["fromNode"] in chosen and e["toNode"] in chosen]
+    return {"nodes": nodes, "edges": edges}
+
+
 def summary(c: Canvas) -> dict:
     nodes = c.data.get("nodes", [])
     return {"id": c.id, "name": c.name, "revision": c.revision, "nodes": len(nodes),

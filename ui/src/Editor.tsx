@@ -24,7 +24,8 @@ import {
   type Edge,
   type Node,
 } from "@xyflow/react";
-import { api, ApiError, CLIENT_ID, isMine, releaseOnUnload, type CanvasEvent, type JsonCanvas, type Lease } from "./api";
+import { api, ApiError, CLIENT_ID, isMine, releaseOnUnload, type CanvasEvent, type JsonCanvas, type Lease, type Template } from "./api";
+import { DRAG_TYPE, Palette } from "./Palette";
 import {
   PRESETS,
   edgeVisual,
@@ -100,6 +101,8 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
   const [lease, setLease] = useState<Lease | null>(null);
   const [canEdit, setCanEdit] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
+  const [paletteOpen, setPaletteOpen] = useState(() => localStorage.getItem("nw.palette") !== "0");
+  const [tplReload, setTplReload] = useState(0);
   const otherLease = lease && !isMine(lease) ? lease : null;
   const readOnly = !canEdit || !!otherLease;
   const flow = useReactFlow<CNode, CEdge>();
@@ -393,6 +396,98 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
     setNodes((ns) => [...ns.map((n) => ({ ...n, selected: false })), node]);
   };
 
+  // A template is a JSON Canvas fragment starting at (0, 0): copy it with
+  // fresh ids, its top-left at `at` (flow coordinates) or centred in view.
+  const insertTemplate = (t: Template, at?: { x: number; y: number }) => {
+    const src: any[] = t.data.nodes ?? [];
+    if (src.length === 0) return;
+    const w = Math.max(...src.map((n) => n.x + n.width)), h = Math.max(...src.map((n) => n.y + n.height));
+    let pos = at;
+    if (!pos) {
+      const r = wrapper.current!.getBoundingClientRect();
+      const c = flow.screenToFlowPosition({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
+      pos = { x: c.x - w / 2, y: c.y - h / 2 };
+      // Repeated clicks would stack inserts on top of each other: take the
+      // free grid slot nearest the view centre, then make sure it's visible.
+      const boxes = flow.getNodes().map((n) => ({
+        x: n.position.x, y: n.position.y,
+        w: n.measured?.width ?? n.width ?? 0, h: n.measured?.height ?? n.height ?? 0,
+      }));
+      const hits = (p: { x: number; y: number }) =>
+        boxes.some((b) => p.x < b.x + b.w + 20 && p.x + w + 20 > b.x && p.y < b.y + b.h + 20 && p.y + h + 20 > b.y);
+      const base = pos;
+      const slots: { x: number; y: number; d: number }[] = [];
+      for (let i = -6; i <= 6; i++) for (let j = -6; j <= 6; j++) {
+        slots.push({ x: base.x + i * (w + 40), y: base.y + j * (h + 40), d: Math.hypot(i * (w + 40), j * (h + 40)) });
+      }
+      slots.sort((a, b) => a.d - b.d);
+      pos = slots.find((s) => !hits(s)) ?? base;
+      const vis = flow.screenToFlowPosition({ x: r.right, y: r.bottom });
+      const tl = flow.screenToFlowPosition({ x: r.left, y: r.top });
+      if (pos.x < tl.x || pos.y < tl.y || pos.x + w > vis.x || pos.y + h > vis.y) {
+        const p = pos;
+        setTimeout(() => flow.setCenter(p.x + w / 2, p.y + h / 2, { zoom: flow.getZoom(), duration: 300 }), 0);
+      }
+    }
+    const ox = snapTo(pos.x), oy = snapTo(pos.y);
+    const ids = new Map<string, string>();
+    const nodesRaw = src.map((n) => {
+      const id = newId();
+      ids.set(n.id, id);
+      return { ...structuredClone(n), id, x: n.x + ox, y: n.y + oy };
+    });
+    const edgesRaw = (t.data.edges ?? []).map((e: any) => ({
+      ...structuredClone(e), id: newId(), fromNode: ids.get(e.fromNode), toNode: ids.get(e.toNode),
+    }));
+    const f = toFlow({ nodes: nodesRaw, edges: edgesRaw });
+    const added = f.nodes.map((n) => ({ ...n, selected: true }));
+    setNodes((ns) => [
+      ...added.filter((n) => n.type === "group"),
+      ...ns.map((n) => ({ ...n, selected: false })),
+      ...added.filter((n) => n.type !== "group"),
+    ]);
+    setEdges((es) => [...es.map((e) => ({ ...e, selected: false })), ...f.edges]);
+  };
+
+  const onDragOver = (e: React.DragEvent) => {
+    if (readOnly || !e.dataTransfer.types.includes(DRAG_TYPE)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+  };
+
+  const onDrop = async (e: React.DragEvent) => {
+    const id = e.dataTransfer.getData(DRAG_TYPE);
+    if (readOnly || !id) return;
+    e.preventDefault();
+    const at = flow.screenToFlowPosition({ x: e.clientX, y: e.clientY });
+    const t = (await api.templates()).templates.find((x) => x.id === id);
+    if (t) insertTemplate(t, at);
+  };
+
+  const saveSelectionAsTemplate = async () => {
+    const ids = new Set(selNodes.map((n) => n.id));
+    const between = edges.filter((e) => ids.has(e.source) && ids.has(e.target));
+    const kind = selNodes.length === 1 ? "stencil" : "fragment";
+    const name = prompt(kind === "stencil" ? "Name this shape" : "Name this snippet")?.trim();
+    if (!name) return;
+    try {
+      await api.createTemplate(name, kind, toCanvas(selNodes, between));
+      setTplReload((n) => n + 1);
+      setPaletteOpen(true);
+      flash(`Saved "${name}" to your templates`);
+    } catch (err) {
+      flash(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const savePage = async () => {
+    const name = prompt("Name this page template")?.trim();
+    if (!name) return;
+    const { nodes: n, edges: e } = JSON.parse(serialize());
+    await api.createTemplate(name, "page", { nodes: n, edges: e });
+    flash(`Saved "${name}" as a page template`);
+  };
+
   const updateEdgeRaw = useCallback((id: string, patch: Record<string, unknown>) => {
     setEdges((es) => es.map((e) => {
       if (e.id !== id) return e;
@@ -525,6 +620,10 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
     localStorage.setItem("nw.snap", JSON.stringify(snap));
   }, [snap]);
 
+  useEffect(() => {
+    localStorage.setItem("nw.palette", paletteOpen ? "1" : "0");
+  }, [paletteOpen]);
+
   if (loadError) return <div className="center-msg">Couldn't open this canvas: {loadError}</div>;
 
   const oneEdge = selEdges.length === 1 && selNodes.length === 0 ? selEdges[0] : null;
@@ -534,7 +633,8 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
 
   return (
     <ReadOnly.Provider value={readOnly}>
-    <div className={"editor" + (readOnly ? " readonly" : "")} ref={wrapper} onDoubleClick={onPaneDoubleClick}>
+    <div className={"editor" + (readOnly ? " readonly" : "") + (paletteOpen ? " with-palette" : "")} ref={wrapper}
+      onDoubleClick={onPaneDoubleClick} onDragOver={onDragOver} onDrop={(e) => void onDrop(e)}>
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -574,6 +674,8 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
           <button onClick={() => addNode("text")} title="Add a text card (or double-click the canvas)">+ Text</button>
           <button onClick={() => addNode("group")}>+ Group</button>
           <button onClick={() => addNode("link")}>+ Link</button>
+          <button className={paletteOpen ? "on" : ""} onClick={() => setPaletteOpen(!paletteOpen)}
+            title="Shapes, snippets and page templates">Templates</button>
           <span className="sep" />
           <button onClick={() => step(undo, redo)} title="Undo (Ctrl+Z)">↶</button>
           <button onClick={() => step(redo, undo)} title="Redo (Ctrl+Shift+Z)">↷</button>
@@ -634,6 +736,8 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
               </>
             )}
             <span className="sep" />
+            {selNodes.length > 0 && <button onClick={() => void saveSelectionAsTemplate()}
+              title="Keep the selected nodes (and the edges between them) as a reusable template">Save as template…</button>}
             <button onClick={deleteSelection} title="Delete (Del)">Delete</button>
           </Panel>
         )}
@@ -660,6 +764,10 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
         )}
       </ReactFlow>
       <Markers edges={edges} />
+      {paletteOpen && (
+        <Palette editable={!readOnly} reloadKey={tplReload} onInsert={(t) => insertTemplate(t)}
+          onSavePage={savePage} onClose={() => setPaletteOpen(false)} />
+      )}
       {labelEdit && (
         <input
           className="label-edit"

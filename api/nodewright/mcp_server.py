@@ -21,7 +21,8 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.streamable_http_manager import StreamableHTTPASGIApp
 from mcp.server.transport_security import TransportSecuritySettings
 
-from . import __version__, access, canvas_format, leases, ops, styleguide, styles, tokens
+from . import (__version__, access, canvas_format, leases, ops, styleguide, styles, templates,
+               tokens)
 from .config import Settings
 from .db import Database
 from .models import Canvas, User, Workspace
@@ -42,6 +43,9 @@ grouped as tabs in workspaces. You are acting for the signed-in user who connect
 - Shapes and line styles are `styleAttributes` on nodes and edges (add_elements lists the
   values): e.g. a decision is a text node with {"shape": "diamond", "textAlign": "center"},
   an optional dependency an edge with {"path": "short-dashed"}.
+- list_templates shows ready-made stencils, fragments and pages (the user's own and
+  built-ins); apply_template drops one onto a canvas. Prefer the user's templates when they
+  fit. save_template keeps part of a canvas for reuse.
 - The user sees your changes live in their browser.
 """
 
@@ -133,7 +137,7 @@ def build(db: Database, settings: Settings) -> tuple[MCPServer, ASGIApp]:
             s.add(ws)
             s.flush()
             c = Canvas(workspace_id=ws.id, name="Untitled", position=0, revision=1,
-                       data=canvas_format.empty())
+                       data=templates.page_data(s, user, None))
             s.add(c)
             s.flush()
             return {"workspace_id": ws.id, "canvas_id": c.id}
@@ -141,15 +145,22 @@ def build(db: Database, settings: Settings) -> tuple[MCPServer, ASGIApp]:
 
     @server.tool()
     def create_canvas(ctx: Context, workspace_id: str,
-                      name: Annotated[str, Field(min_length=1, max_length=200)]) -> dict:
-        """Add an empty canvas (a new tab) to a workspace."""
+                      name: Annotated[str, Field(min_length=1, max_length=200)],
+                      template: Annotated[str | None, Field(
+                          description="Page template id to start from (list_templates). "
+                                      "Omit for the user's default page.")] = None) -> dict:
+        """Add a canvas (a new tab) to a workspace, starting from a page template."""
         def go(s, user, who):
             from sqlalchemy import func, select
             ws = access.workspace(s, user, workspace_id, access.CANVAS_CREATE)
+            try:
+                data = templates.page_data(s, user, template)
+            except templates.TemplateError as exc:
+                raise ToolError(str(exc)) from None
             last = s.scalar(select(func.max(Canvas.position))
                             .where(Canvas.workspace_id == ws.id))
             c = Canvas(workspace_id=ws.id, name=name.strip(), revision=1,
-                       data=canvas_format.empty(), position=(last + 1) if last is not None else 0)
+                       data=data, position=(last + 1) if last is not None else 0)
             s.add(c)
             s.flush()
             return {"canvas_id": c.id, "url": f"{settings.public_url}/?canvas={c.id}"}
@@ -232,6 +243,54 @@ def build(db: Database, settings: Settings) -> tuple[MCPServer, ASGIApp]:
         def go(s, user, who):
             access.canvas(s, user, canvas_id)
             return {"released": leases.release(s, canvas_id, who)}
+        return run(ctx, go)
+
+    @server.tool()
+    def list_templates(ctx: Context) -> dict:
+        """Templates you can use: stencil (one styled node), fragment (a few
+        connected nodes) and page (a whole starting canvas). The user's own come
+        first. Returns ids, names, kinds and node counts; pass an id to
+        apply_template or create_canvas."""
+        def go(s, user, who):
+            def brief(t):
+                d = t["data"]
+                return {"id": t["id"], "name": t["name"], "kind": t["kind"],
+                        "builtin": t["builtin"], "nodes": len(d["nodes"]),
+                        "texts": [n.get("text") or n.get("label") for n in d["nodes"]][:6]}
+            mine = [brief(templates.out(t)) for t in templates.mine(s, user)]
+            return {"templates": mine + [brief(t) for t in templates.BUILTIN.values()],
+                    "default_page": templates.default_page_id(s, user)}
+        return run(ctx, go)
+
+    @server.tool()
+    def apply_template(ctx: Context, canvas_id: str, template_id: str,
+                       x: int | None = None, y: int | None = None) -> dict:
+        """Drop a template's nodes onto a canvas with fresh ids, its top-left at
+        (x, y), or beside the existing drawing if omitted. Returns the new ids;
+        edit their text with update_elements."""
+        def go(s, user, who):
+            t = templates.get(s, user, template_id)
+            if t is None:
+                raise ToolError(f"no template {template_id!r}; see list_templates")
+            c, result = ops.mutate(s, user, canvas_id, who, ops.insert(t["data"], x, y),
+                                   settings.max_canvas_bytes)
+            return {**result, "revision": c.revision}
+        return run(ctx, go)
+
+    @server.tool()
+    def save_template(ctx: Context, canvas_id: str, node_ids: list[str],
+                      name: Annotated[str, Field(min_length=1, max_length=200)],
+                      kind: Literal["stencil", "fragment", "page"] = "fragment") -> dict:
+        """Save nodes from a canvas (with the contents of any chosen group, and
+        the edges between them) as one of the user's templates. Ask the user
+        before saving templates they didn't ask for."""
+        def go(s, user, who):
+            c = access.canvas(s, user, canvas_id)
+            try:
+                t = templates.create(s, user, name, kind, ops.extract(c.data, node_ids))
+            except templates.TemplateError as exc:
+                raise ToolError(str(exc)) from None
+            return {"template_id": t.id, "kind": t.kind, "nodes": len(t.data["nodes"])}
         return run(ctx, go)
 
     @server.tool()

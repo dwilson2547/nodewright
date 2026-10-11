@@ -235,3 +235,29 @@ class OAuthGrant(Base):
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     user: Mapped[User] = relationship()
+
+
+class Template(Base):
+    """A user's reusable piece of canvas (design §4): a JSON Canvas document
+    whose coordinates start at (0, 0). kind: stencil (one node), fragment
+    (several, dropped as a unit) or page (a whole starting canvas)."""
+    __tablename__ = "templates"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(200))
+    kind: Mapped[str] = mapped_column(String(16))
+    data: Mapped[dict] = mapped_column(Json)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class UserPrefs(Base):
+    """Per-user settings that don't belong on the users row (which would need
+    a migration to grow)."""
+    __tablename__ = "user_prefs"
+
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    default_page: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

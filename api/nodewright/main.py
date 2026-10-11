@@ -23,10 +23,11 @@ from pydantic import AnyHttpUrl, BaseModel, ConfigDict
 from starlette.routing import Route
 
 from . import (__version__, access, auth, canvas_format, events, leases, mcp_server, oauth,
-               oidc, styleguide, tokens)
+               oidc, styleguide, templates, tokens)
 from .config import Settings
 from .db import Database
-from .models import AccessToken, Canvas, OAuthGrant, CanvasRevision, StyleGuide, User, Workspace, utcnow
+from .models import (AccessToken, Canvas, CanvasRevision, OAuthGrant, StyleGuide, Template, User,
+                     Workspace, utcnow)
 
 log = logging.getLogger("nodewright")
 
@@ -46,6 +47,17 @@ class NameIn(BaseModel):
 class CanvasCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     data: dict | None = None
+    template: str | None = Field(default=None, max_length=64)
+
+
+class TemplateIn(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    kind: str = Field(pattern="^(stencil|fragment|page)$")
+    data: dict
+
+
+class DefaultPageIn(BaseModel):
+    template: str = Field(min_length=1, max_length=64)
 
 
 class StyleGuideIn(BaseModel):
@@ -249,7 +261,7 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
         s.add(ws)
         s.flush()
         s.add(Canvas(workspace_id=ws.id, name="Untitled", position=0, revision=1,
-                     data=canvas_format.empty()))
+                     data=templates.page_data(s, user, None)))
         return _ws_out(ws)
 
     @app.patch("/api/workspaces/{ws_id}")
@@ -275,7 +287,13 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
     def create_canvas(ws_id: str, body: CanvasCreate, user: User = Depends(user_dep),
                       s: Session = Depends(session)):
         ws = workspace_for(s, user, ws_id, access.CANVAS_CREATE)
-        data = checked(body.data) if body.data is not None else canvas_format.empty()
+        if body.data is not None:
+            data = checked(body.data)
+        else:
+            try:
+                data = templates.page_data(s, user, body.template)
+            except templates.TemplateError as exc:
+                raise HTTPException(404, str(exc)) from None
         if len(json.dumps(data)) > settings.max_canvas_bytes:
             raise HTTPException(413, "canvas is too large")
         last = s.scalar(select(func.max(Canvas.position)).where(Canvas.workspace_id == ws.id))
@@ -463,6 +481,49 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
         else:
             row.text, row.updated_at = body.text, utcnow()
         return {"text": body.text, "is_default": False}
+
+    # --- templates (templates.py) ------------------------------------------
+
+    @app.get("/api/templates")
+    def list_templates(user: User = Depends(user_dep), s: Session = Depends(session)):
+        return {"templates": list(templates.BUILTIN.values())
+                + [templates.out(t) for t in templates.mine(s, user)],
+                "default_page": templates.default_page_id(s, user)}
+
+    @app.post("/api/templates", status_code=201)
+    def create_template(body: TemplateIn, user: User = Depends(user_dep),
+                        s: Session = Depends(session)):
+        try:
+            return templates.out(templates.create(s, user, body.name, body.kind, body.data))
+        except templates.TemplateError as exc:
+            raise HTTPException(422, str(exc)) from None
+
+    def own_template(s: Session, user: User, tid: str) -> Template:
+        t = s.get(Template, tid)
+        if t is None or t.owner_id != user.id:
+            raise HTTPException(404, "template not found")
+        return t
+
+    @app.patch("/api/templates/{tid}")
+    def rename_template(tid: str, body: NameIn, user: User = Depends(user_dep),
+                        s: Session = Depends(session)):
+        t = own_template(s, user, tid)
+        t.name, t.updated_at = body.name.strip(), utcnow()
+        return templates.out(t)
+
+    @app.delete("/api/templates/{tid}", status_code=204)
+    def delete_template(tid: str, user: User = Depends(user_dep), s: Session = Depends(session)):
+        s.delete(own_template(s, user, tid))
+        return Response(status_code=204)
+
+    @app.put("/api/templates-default-page")
+    def put_default_page(body: DefaultPageIn, user: User = Depends(user_dep),
+                         s: Session = Depends(session)):
+        try:
+            templates.set_default_page(s, user, body.template)
+        except templates.TemplateError as exc:
+            raise HTTPException(422, str(exc)) from None
+        return {"default_page": body.template}
 
     # --- OAuth for MCP clients (oauth.py) ------------------------------------
 

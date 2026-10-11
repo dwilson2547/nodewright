@@ -59,6 +59,9 @@ export type Token = { id: string; name: string; prefix: string; created_at: stri
 export type NewToken = Token & { token: string; mcp_url: string };
 export type Grant = { id: string; client_name: string; created_at: string; last_used_at: string | null };
 export type StyleGuide = { text: string; is_default: boolean };
+export type TemplateKind = "stencil" | "fragment" | "page";
+export type Template = { id: string; name: string; kind: TemplateKind; builtin: boolean; data: JsonCanvas };
+export type Templates = { templates: Template[]; default_page: string };
 
 export const api = {
   config: () => call<Config>("GET", "/api/config"),
@@ -70,8 +73,8 @@ export const api = {
   renameWorkspace: (id: string, name: string) => call<Workspace>("PATCH", `/api/workspaces/${id}`, { name }),
   deleteWorkspace: (id: string) => call("DELETE", `/api/workspaces/${id}`),
   canvases: (wsId: string) => call<CanvasMeta[]>("GET", `/api/workspaces/${wsId}/canvases`),
-  createCanvas: (wsId: string, name: string, data?: JsonCanvas) =>
-    call<CanvasMeta>("POST", `/api/workspaces/${wsId}/canvases`, { name, data }),
+  createCanvas: (wsId: string, name: string, data?: JsonCanvas, template?: string) =>
+    call<CanvasMeta>("POST", `/api/workspaces/${wsId}/canvases`, { name, data, template }),
   canvas: (id: string) => call<CanvasFull>("GET", `/api/canvases/${id}`),
   saveCanvas: (id: string, base_revision: number, data: JsonCanvas) =>
     call<{ id: string; revision: number }>("PUT", `/api/canvases/${id}`, { base_revision, data }),
@@ -89,6 +92,13 @@ export const api = {
   revokeGrant: (id: string) => call("DELETE", `/api/oauth/grants/${id}`),
   styleGuide: () => call<StyleGuide>("GET", "/api/style-guide"),
   saveStyleGuide: (text: string) => call<StyleGuide>("PUT", "/api/style-guide", { text }),
+  templates: () => call<Templates>("GET", "/api/templates"),
+  createTemplate: (name: string, kind: TemplateKind, data: JsonCanvas) =>
+    call<Template>("POST", "/api/templates", { name, kind, data }),
+  renameTemplate: (id: string, name: string) => call<Template>("PATCH", `/api/templates/${id}`, { name }),
+  deleteTemplate: (id: string) => call("DELETE", `/api/templates/${id}`),
+  setDefaultPage: (template: string) =>
+    call<{ default_page: string }>("PUT", "/api/templates-default-page", { template }),
 };
 
 /** Best-effort lease release while the page is unloading. */
