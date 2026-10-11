@@ -86,8 +86,8 @@ def build(db: Database, settings: Settings) -> tuple[MCPServer, ASGIApp]:
             except access.Denied as exc:
                 raise ToolError(str(exc)) from None
             except leases.Locked as exc:
-                raise ToolError(f"canvas is locked: {exc}. Wait for it to free up or ask the "
-                                "user; they can also take over from the browser.") from None
+                raise ToolError(f"canvas is locked: {exc}. Wait for it to free up, or ask "
+                                "the user.") from None
             except (ops.OpError, canvas_format.CanvasError) as exc:
                 raise ToolError(str(exc)) from None
 
@@ -98,13 +98,13 @@ def build(db: Database, settings: Settings) -> tuple[MCPServer, ASGIApp]:
         return run(ctx, go)
 
     @server.tool()
-    def list_workspaces(ctx: Context) -> list[dict]:
+    def list_workspaces(ctx: Context) -> dict:
         """Workspaces you can see, each with its canvases (tabs): ids, names,
         revisions and node/edge counts."""
         def go(s, user, who):
-            return [{"id": ws.id, "name": ws.name,
-                     "canvases": [ops.summary(c) for c in ws.canvases]}
-                    for ws in access.visible_workspaces(s, user)]
+            return {"workspaces": [{"id": ws.id, "name": ws.name,
+                                    "canvases": [ops.summary(c) for c in ws.canvases]}
+                                   for ws in access.visible_workspaces(s, user)]}
         return run(ctx, go)
 
     @server.tool()

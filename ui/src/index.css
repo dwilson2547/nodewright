@@ -82,3 +82,28 @@ input[type="color"] { width: 24px; height: 22px; padding: 0; border: none; backg
 .md a, .nw-body a { color: var(--accent); }
 .md-gap { height: .5em; }
 .wikilink { color: var(--accent); }
+
+/* --- leases, notices ------------------------------------------------------- */
+.banner.agent { border-color: #8b5cf6; }
+.banner.notice { border-color: var(--border); font-size: 12px; }
+.status.s-locked { color: #8b5cf6; }
+
+/* --- agents dialog --------------------------------------------------------- */
+.modal-back { position: fixed; inset: 0; background: #0006; display: grid; place-items: center; z-index: 50; }
+.modal { background: var(--panel); color: var(--fg); border: 1px solid var(--border); border-radius: 10px; width: min(760px, 94vw); max-height: 90vh; overflow: auto; padding: 0 20px 20px; box-shadow: 0 8px 30px #0004; }
+.modal-head { display: flex; align-items: center; position: sticky; top: 0; background: var(--panel); padding: 12px 0 4px; }
+.modal-head h2 { margin: 0; font-size: 18px; }
+.modal section { margin-top: 16px; }
+.modal h3 { margin: 0 0 4px; font-size: 15px; }
+.modal p { margin: 6px 0; }
+.row { display: flex; gap: 8px; align-items: flex-start; margin: 6px 0; }
+.row input { flex: 1; }
+.token-once { border: 1px solid var(--accent); border-radius: 8px; padding: 8px 12px; margin: 8px 0; }
+.token-once pre, .token-once code.grow { margin: 0; padding: 6px 8px; background: var(--bg); border-radius: 6px; font-size: 12px; white-space: pre-wrap; word-break: break-all; }
+.tokens { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
+.tokens th, .tokens td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--border); }
+.styleguide { width: 100%; min-height: 240px; font-family: ui-monospace, monospace; font-size: 12px; box-sizing: border-box; }
+
+/* Our node type is called "group", which also picks up React Flow's built-in group styling. */
+.react-flow__node-group { border: none; padding: 0; background: transparent; border-radius: 0; box-shadow: none; }
+.react-flow__node-group.selected, .react-flow__node-group:focus { box-shadow: none; }

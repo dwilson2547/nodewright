@@ -284,7 +284,7 @@ def test_mcp_lists_tools(mcp):
 
 def test_mcp_builds_a_diagram_the_ui_can_load(mcp):
     m, web = mcp
-    ws = m.call("list_workspaces")[0]
+    ws = m.call("list_workspaces")["workspaces"][0]
     tab = ws["canvases"][0]
     assert "style guide" in m.call("get_style_guide")["style_guide"].lower()
     out = m.call("add_elements", canvas_id=tab["id"],

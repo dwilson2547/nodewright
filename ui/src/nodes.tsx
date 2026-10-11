@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState, type CSSProperties } from "react";
+import { createContext, memo, useContext, useEffect, useRef, useState, type CSSProperties } from "react";
 import { Handle, NodeResizer, Position, useReactFlow, type NodeProps } from "@xyflow/react";
 import { resolveColor, type CNode } from "./canvasMapping";
 import { Markdown, safeUrl } from "./markdown";
@@ -27,11 +27,16 @@ function colorStyle(raw: Record<string, any>): CSSProperties {
   return c ? ({ "--node-color": c } as CSSProperties) : {};
 }
 
+/** True while someone else holds the canvas's edit lease. */
+export const ReadOnly = createContext(false);
+
 function useEditable(id: string, raw: Record<string, any>, field: string) {
   const { updateNodeData } = useReactFlow();
+  const readOnly = useContext(ReadOnly);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const start = () => {
+    if (readOnly) return;
     setDraft(String(raw[field] ?? ""));
     setEditing(true);
   };

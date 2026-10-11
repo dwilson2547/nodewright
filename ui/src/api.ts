@@ -10,8 +10,13 @@ export class ApiError extends Error {
   }
 }
 
+// One id per page load: the server's edit lease belongs to a browser tab, so a
+// second tab of the same user is "someone else" (api/nodewright/leases.py).
+export const CLIENT_ID = Math.random().toString(36).slice(2, 12) + Date.now().toString(36);
+export const isMine = (lease: Lease | null) => !!lease && lease.holder.startsWith("ui:") && lease.holder.endsWith(":" + CLIENT_ID);
+
 async function call<T>(method: string, url: string, body?: unknown): Promise<T> {
-  const headers: Record<string, string> = { "X-Nodewright": "1" };
+  const headers: Record<string, string> = { "X-Nodewright": "1", "X-Nodewright-Client": CLIENT_ID };
   if (body !== undefined) headers["Content-Type"] = "application/json";
   const r = await fetch(url, {
     method,
@@ -37,7 +42,22 @@ export type CanvasMeta = {
   updated_at: string;
 };
 export type JsonCanvas = { nodes?: any[]; edges?: any[]; [k: string]: unknown };
-export type CanvasFull = CanvasMeta & { data: JsonCanvas };
+export type Lease = {
+  holder: string;
+  kind: "ui" | "agent";
+  label: string;
+  expires_at: string;
+  seconds_left: number;
+  message: string;
+};
+export type CanvasFull = CanvasMeta & { data: JsonCanvas; lease: Lease | null; can_edit: boolean };
+export type CanvasEvent =
+  | { type: "hello"; revision: number; lease: Lease | null }
+  | { type: "revision"; revision: number; source: string; by: string; client: string }
+  | { type: "lease"; lease: Lease | null };
+export type Token = { id: string; name: string; prefix: string; created_at: string; last_used_at: string | null };
+export type NewToken = Token & { token: string; mcp_url: string };
+export type StyleGuide = { text: string; is_default: boolean };
 
 export const api = {
   config: () => call<Config>("GET", "/api/config"),
@@ -57,4 +77,23 @@ export const api = {
   patchCanvas: (id: string, patch: { name?: string; position?: number }) =>
     call<CanvasMeta>("PATCH", `/api/canvases/${id}`, patch),
   deleteCanvas: (id: string) => call("DELETE", `/api/canvases/${id}`),
+  lease: (id: string) => call<{ lease: Lease | null }>("GET", `/api/canvases/${id}/lease`),
+  takeLease: (id: string, force = false) =>
+    call<{ lease: Lease }>("POST", `/api/canvases/${id}/lease${force ? "?force=true" : ""}`),
+  releaseLease: (id: string) => call("DELETE", `/api/canvases/${id}/lease`),
+  tokens: () => call<Token[]>("GET", "/api/tokens"),
+  createToken: (name: string) => call<NewToken>("POST", "/api/tokens", { name }),
+  revokeToken: (id: string) => call("DELETE", `/api/tokens/${id}`),
+  styleGuide: () => call<StyleGuide>("GET", "/api/style-guide"),
+  saveStyleGuide: (text: string) => call<StyleGuide>("PUT", "/api/style-guide", { text }),
 };
+
+/** Best-effort lease release while the page is unloading. */
+export function releaseOnUnload(id: string) {
+  void fetch(`/api/canvases/${id}/lease`, {
+    method: "DELETE",
+    keepalive: true,
+    credentials: "same-origin",
+    headers: { "X-Nodewright": "1", "X-Nodewright-Client": CLIENT_ID },
+  }).catch(() => undefined);
+}

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ReactFlowProvider } from "@xyflow/react";
 import { api, ApiError, type CanvasMeta, type Config, type Me, type Workspace } from "./api";
 import { Editor, type EditorHandle, type SaveStatus } from "./Editor";
+import { AgentSettings } from "./Settings";
 
 const STATUS_TEXT: Record<SaveStatus, string> = {
   loading: "Loading…",
@@ -9,8 +10,16 @@ const STATUS_TEXT: Record<SaveStatus, string> = {
   unsaved: "Unsaved",
   saving: "Saving…",
   conflict: "Conflict",
+  locked: "Locked",
   error: "Save failed",
 };
+
+// /?canvas=<id> opens that tab (agents hand these links out).
+function linkedCanvas(): string | null {
+  const id = new URLSearchParams(location.search).get("canvas");
+  if (id) history.replaceState(null, "", "/");
+  return id;
+}
 
 function signinError(): string | null {
   const e = new URLSearchParams(location.search).get("signin_error");
@@ -84,6 +93,8 @@ export default function App() {
   const [tabId, setTabId] = useState<string | null>(null);
   const [status, setStatus] = useState<SaveStatus>("loading");
   const [error, setError] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const linked = useRef<string | null>(linkedCanvas());
   const editor = useRef<EditorHandle>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -101,6 +112,14 @@ export default function App() {
   const loadWorkspaces = useCallback(async (prefer?: string) => {
     const list = await api.workspaces();
     setWorkspaces(list);
+    if (!prefer && linked.current) {
+      const c = await api.canvas(linked.current).catch(() => null);
+      if (c) {
+        localStorage.setItem("nw.tab." + c.workspace_id, c.id);
+        prefer = c.workspace_id;
+      }
+      linked.current = null;
+    }
     const saved = prefer ?? localStorage.getItem("nw.ws");
     setWsId(list.find((w) => w.id === saved)?.id ?? list[0]?.id ?? null);
   }, []);
@@ -241,6 +260,7 @@ export default function App() {
           e.target.value = "";
           if (f) void importFile(f);
         }} />
+        <button onClick={() => setSettingsOpen(true)} title="Access tokens and style guide for AI agents (MCP)">Agents</button>
         <span className="muted">{me.username}</span>
         <button onClick={signOut}>Sign out</button>
       </header>
@@ -263,6 +283,7 @@ export default function App() {
           </ReactFlowProvider>
         )}
       </main>
+      {settingsOpen && <AgentSettings onClose={() => setSettingsOpen(false)} />}
     </div>
   );
 }

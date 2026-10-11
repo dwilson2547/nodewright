@@ -24,7 +24,7 @@ import {
   type Edge,
   type Node,
 } from "@xyflow/react";
-import { api, ApiError, type JsonCanvas } from "./api";
+import { api, ApiError, CLIENT_ID, isMine, releaseOnUnload, type CanvasEvent, type JsonCanvas, type Lease } from "./api";
 import {
   PRESETS,
   edgeVisual,
@@ -34,14 +34,15 @@ import {
   type CEdge,
   type CNode,
 } from "./canvasMapping";
-import { nodeTypes } from "./nodes";
+import { nodeTypes, ReadOnly } from "./nodes";
 
-export type SaveStatus = "loading" | "saved" | "unsaved" | "saving" | "conflict" | "error";
+export type SaveStatus = "loading" | "saved" | "unsaved" | "saving" | "conflict" | "locked" | "error";
 export type EditorHandle = { flush: () => Promise<boolean>; exportDoc: () => JsonCanvas | null };
 
 const SAVE_DEBOUNCE_MS = 700;
 const RETRY_MS = 5000;
 const HISTORY_LIMIT = 200;
+const NOTICE_MS = 4000;
 const SIZES: Record<string, [number, number]> = {
   text: [260, 80],
   group: [480, 320],
@@ -75,6 +76,11 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
   const [conflict, setConflict] = useState<{ revision: number; data: JsonCanvas } | null>(null);
   const [snap, setSnap] = useState<SnapPrefs>(loadSnap);
   const [labelEdit, setLabelEdit] = useState<{ id: string; x: number; y: number; value: string } | null>(null);
+  const [lease, setLease] = useState<Lease | null>(null);
+  const [canEdit, setCanEdit] = useState(true);
+  const [notice, setNotice] = useState<string | null>(null);
+  const otherLease = lease && !isMine(lease) ? lease : null;
+  const readOnly = !canEdit || !!otherLease;
   const flow = useReactFlow<CNode, CEdge>();
   const wrapper = useRef<HTMLDivElement>(null);
 
@@ -88,6 +94,8 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
   const timer = useRef<number | undefined>(undefined);
   const retry = useRef<number | undefined>(undefined);
   const inConflict = useRef(false);
+  const blocked = useRef(false);
+  const noticeTimer = useRef<number | undefined>(undefined);
   const groupDrag = useRef<{ id: string; start: { x: number; y: number }; members: Map<string, { x: number; y: number }> } | null>(null);
 
   const setStatus = useCallback((s: SaveStatus) => {
@@ -117,6 +125,8 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
       (c) => {
         if (!alive) return;
         revision.current = c.revision;
+        setLease(c.lease);
+        setCanEdit(c.can_edit);
         const s = apply(c.data);
         lastSaved.current = current.current = s;
         undo.current = [];
@@ -135,6 +145,10 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
   // --- saving -----------------------------------------------------------------
   const save = useCallback(async (): Promise<boolean> => {
     if (inConflict.current) return false;
+    if (blocked.current) {
+      if (serialize() !== lastSaved.current) setStatus("locked");
+      return false;
+    }
     if (saving.current) {
       await saving.current;
     }
@@ -156,6 +170,10 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
           inConflict.current = true;
           setConflict({ revision: e.body.current.revision, data: e.body.current.data });
           setStatus("conflict");
+        } else if (e instanceof ApiError && e.status === 423) {
+          blocked.current = true;
+          setLease(e.body.lease);
+          setStatus("locked");
         } else {
           setStatus("error");
           window.clearTimeout(retry.current);
@@ -174,6 +192,87 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
   useEffect(() => {
     saveRef.current = save;
   }, [save]);
+
+  // --- live updates and the edit lease ----------------------------------------
+  const flash = useCallback((text: string) => {
+    setNotice(text);
+    window.clearTimeout(noticeTimer.current);
+    noticeTimer.current = window.setTimeout(() => setNotice(null), NOTICE_MS);
+  }, []);
+
+  // Someone else saved. With nothing unsaved here, show their version (the
+  // previous state stays on the undo stack); otherwise the next save hits
+  // the 409 and the conflict banner decides.
+  const pull = useCallback(async (by?: string) => {
+    const c = await api.canvas(canvasId);
+    if (c.revision <= revision.current || inConflict.current) return;
+    if (serialize() !== lastSaved.current) return;
+    undo.current.push(current.current);
+    redo.current = [];
+    revision.current = c.revision;
+    setLease(c.lease);
+    lastSaved.current = current.current = apply(c.data);
+    setStatus("saved");
+    if (by) flash(`Updated by ${by}`);
+  }, [canvasId, apply, serialize, setStatus, flash]);
+
+  const pullRef = useRef(pull);
+  useEffect(() => {
+    pullRef.current = pull;
+  }, [pull]);
+
+  useEffect(() => {
+    if (!loaded) return;
+    const es = new EventSource(`/api/canvases/${canvasId}/events`);
+    es.onmessage = (m) => {
+      const ev = JSON.parse(m.data) as CanvasEvent;
+      if (ev.type === "hello") {
+        setLease(ev.lease);
+        if (ev.revision > revision.current) void pullRef.current();
+      } else if (ev.type === "lease") {
+        setLease(ev.lease);
+      } else if (ev.type === "revision") {
+        const mine = ev.client.startsWith("ui:") && ev.client.endsWith(":" + CLIENT_ID);
+        if (!mine && ev.revision > revision.current) void pullRef.current(ev.by);
+      }
+    };
+    return () => es.close();
+  }, [canvasId, loaded]);
+
+  // Leases lapse without an event; check again when this one should have.
+  useEffect(() => {
+    blocked.current = !!otherLease;
+    if (!otherLease) {
+      if (loaded && serialize() !== lastSaved.current && !inConflict.current) void saveRef.current();
+      return;
+    }
+    const t = window.setTimeout(() => {
+      api.lease(canvasId).then((r) => setLease(r.lease), () => undefined);
+    }, otherLease.seconds_left * 1000 + 500);
+    return () => window.clearTimeout(t);
+  }, [otherLease, canvasId, loaded, serialize]);
+
+  useEffect(() => {
+    const bye = () => releaseOnUnload(canvasId);
+    window.addEventListener("pagehide", bye);
+    return () => {
+      window.removeEventListener("pagehide", bye);
+      void api.releaseLease(canvasId).catch(() => undefined);
+    };
+  }, [canvasId]);
+
+  const takeOver = async () => {
+    try {
+      const r = await api.takeLease(canvasId, true);
+      setLease(r.lease);
+      blocked.current = false;
+      // Whatever they wrote while holding it comes first.
+      await pull();
+      if (serialize() !== lastSaved.current) void save();
+    } catch (e) {
+      flash(e instanceof Error ? e.message : String(e));
+    }
+  };
 
   // Every settled change: record history, then save.
   useEffect(() => {
@@ -218,6 +317,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
   useEffect(() => () => {
     window.clearTimeout(timer.current);
     window.clearTimeout(retry.current);
+    window.clearTimeout(noticeTimer.current);
   }, []);
 
   const resolveConflict = async (keepMine: boolean) => {
@@ -328,12 +428,14 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
   }, []);
 
   const onPaneDoubleClick = (e: ReactMouseEvent) => {
+    if (readOnly) return;
     if (!(e.target as HTMLElement).classList.contains("react-flow__pane")) return;
     const p = flow.screenToFlowPosition({ x: e.clientX, y: e.clientY });
     addNode("text", { x: p.x - SIZES.text[0] / 2, y: p.y - SIZES.text[1] / 2 });
   };
 
   const onEdgeDoubleClick = (e: ReactMouseEvent, edge: Edge) => {
+    if (readOnly) return;
     const r = wrapper.current!.getBoundingClientRect();
     setLabelEdit({ id: edge.id, x: e.clientX - r.left, y: e.clientY - r.top, value: (edge as CEdge).data?.raw.label ?? "" });
   };
@@ -367,6 +469,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
       const t = e.target as HTMLElement;
       if (t.closest("input, textarea, [contenteditable]")) return;
       const mod = e.ctrlKey || e.metaKey;
+      if (readOnly && mod && "zy".includes(e.key.toLowerCase())) return;
       if (mod && e.key.toLowerCase() === "z") {
         e.preventDefault();
         if (e.shiftKey) step(redo, undo);
@@ -381,7 +484,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [step, flush]);
+  }, [step, flush, readOnly]);
 
   useEffect(() => {
     localStorage.setItem("nw.snap", JSON.stringify(snap));
@@ -392,7 +495,8 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
   const oneEdge = selEdges.length === 1 && selNodes.length === 0 ? selEdges[0] : null;
 
   return (
-    <div className="editor" ref={wrapper} onDoubleClick={onPaneDoubleClick}>
+    <ReadOnly.Provider value={readOnly}>
+    <div className={"editor" + (readOnly ? " readonly" : "")} ref={wrapper} onDoubleClick={onPaneDoubleClick}>
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -409,7 +513,11 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
         snapToGrid={snap.on}
         snapGrid={[snap.size, snap.size]}
         zoomOnDoubleClick={false}
-        deleteKeyCode={["Delete", "Backspace"]}
+        deleteKeyCode={readOnly ? null : ["Delete", "Backspace"]}
+        nodesDraggable={!readOnly}
+        nodesConnectable={!readOnly}
+        elementsSelectable={!readOnly}
+        edgesReconnectable={!readOnly}
         multiSelectionKeyCode={["Shift", "Meta", "Control"]}
         elevateNodesOnSelect={false}
         minZoom={0.05}
@@ -424,7 +532,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
         />
         <Controls showInteractive={false} />
         <MiniMap pannable zoomable />
-        <Panel position="top-left" className="toolbar">
+        {!readOnly && <Panel position="top-left" className="toolbar">
           <button onClick={() => addNode("text")} title="Add a text card (or double-click the canvas)">+ Text</button>
           <button onClick={() => addNode("group")}>+ Group</button>
           <button onClick={() => addNode("link")}>+ Link</button>
@@ -438,8 +546,8 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
           <select value={snap.size} disabled={!snap.on} onChange={(e) => setSnap({ ...snap, size: Number(e.target.value) })} title="Grid size">
             {[10, 20, 40].map((s) => <option key={s} value={s}>{s}px</option>)}
           </select>
-        </Panel>
-        {(selNodes.length > 0 || selEdges.length > 0) && (
+        </Panel>}
+        {!readOnly && (selNodes.length > 0 || selEdges.length > 0) && (
           <Panel position="top-center" className="toolbar selbar">
             <span className="muted">Colour</span>
             <button className="swatch none" title="Default" onClick={() => setColor(undefined)} />
@@ -472,6 +580,17 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
             <button onClick={() => void resolveConflict(true)}>Keep mine</button>
           </Panel>
         )}
+        {otherLease && !conflict && (
+          <Panel position="bottom-center" className={"banner" + (otherLease.kind === "agent" ? " agent" : "")}>
+            {otherLease.kind === "agent" ? "🤖 " : ""}<strong>{otherLease.label}</strong>&nbsp;is editing this canvas — view only.
+            {status === "locked" && <span className="muted">Your last change is waiting to save.</span>}
+            {canEdit && <button onClick={() => void takeOver()}>Take over</button>}
+          </Panel>
+        )}
+        {!canEdit && !otherLease && (
+          <Panel position="bottom-center" className="banner">You can view this canvas but not edit it.</Panel>
+        )}
+        {notice && <Panel position="bottom-left" className="banner notice">{notice}</Panel>}
         {status === "error" && (
           <Panel position="bottom-center" className="banner warn">Couldn't save — retrying…</Panel>
         )}
@@ -492,5 +611,6 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
         />
       )}
     </div>
+    </ReadOnly.Provider>
   );
 });

@@ -16,4 +16,4 @@ USER 10001
 ENV STATIC_DIR=/srv/static
 EXPOSE 8080
 # Traefik in front sets X-Forwarded-*; trust it from any in-cluster peer.
-CMD ["uvicorn", "--factory", "nodewright.main:create_app", "--host", "0.0.0.0", "--port", "8080", "--proxy-headers", "--forwarded-allow-ips", "*"]
+CMD ["uvicorn", "--factory", "nodewright.main:create_app", "--host", "0.0.0.0", "--port", "8080", "--proxy-headers", "--forwarded-allow-ips", "*", "--timeout-graceful-shutdown", "5"]
