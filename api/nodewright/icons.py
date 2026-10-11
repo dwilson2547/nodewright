@@ -3,7 +3,8 @@
 A node refers to one as `icon: "icons/<id>/<name>.svg"`, a vault-relative
 path like attachments, so a zip export can carry the file and Obsidian finds
 it. Built-ins are a curated Lucide subset shipped in builtin_icons/ (ISC,
-see its LICENSE); their ids are `lucide-<name>`. User icons live in the
+see its LICENSE), ids `lucide-<name>`, and the schematic symbols in
+symbols.py, ids `sym-<name>`, which carry pins (ports) and a size. User icons live in the
 `icons` table, each owned by one user. Every SVG passes svgsafe.clean()
 before it is stored or served.
 
@@ -22,7 +23,7 @@ from pathlib import Path
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from . import ports, svgsafe
+from . import ports, svgsafe, symbols
 from .models import Icon, User, utcnow
 
 BUILTIN_DIR = Path(__file__).with_name("builtin_icons")
@@ -60,7 +61,26 @@ def builtins() -> dict[str, dict]:
         name = f.stem.replace("-", " ").capitalize()
         out[icon_id] = {"id": icon_id, "name": name, "svg": svgsafe.clean(f.read_bytes()),
                         "tinted": True, "ports": [], "builtin": True}
+    for d in symbols.definitions():
+        out[d["id"]] = {**d, "svg": svgsafe.clean(d["svg"].encode()), "tinted": True, "builtin": True}
     return out
+
+
+def is_symbol(icon_id: str) -> bool:
+    return icon_id.startswith(symbols.PREFIX)
+
+
+def ports_of(s: Session, file: str) -> tuple[list[dict], int | None] | None:
+    """The pins and default size of the icon a node's `icon` names, or None
+    if there's no such icon."""
+    icon_id = id_of(file)
+    if icon_id is None:
+        return None
+    b = builtins().get(icon_id)
+    if b is not None:
+        return [dict(p) for p in b["ports"]], b.get("size")
+    row = s.get(Icon, icon_id) if re.fullmatch(r"[0-9a-f]{32}", icon_id) else None
+    return ([dict(p) for p in row.ports or []], None) if row else None
 
 
 def out(icon: Icon | dict) -> dict:
@@ -68,9 +88,10 @@ def out(icon: Icon | dict) -> dict:
         i, name, tinted, p, builtin = icon["id"], icon["name"], icon["tinted"], icon["ports"], True
     else:
         i, name, tinted, p, builtin = icon.id, icon.name, icon.tinted, icon.ports or [], False
+    extra = {"category": icon["category"], "size": icon["size"]} if builtin and "category" in icon else {}
     return {"id": i, "name": name, "file": ref(i, name), "url": f"/api/icons/{i}.svg",
             "tinted": tinted, "ports": p, "builtin": builtin,
-            "editable": not builtin and icon.source is not None}
+            "editable": not builtin and icon.source is not None, **extra}
 
 
 def _source(value) -> dict | None:

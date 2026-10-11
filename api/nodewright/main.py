@@ -715,7 +715,9 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
 
     @app.get("/api/icons")
     def list_icons(user: User = Depends(user_dep), s: Session = Depends(session)):
-        return {"builtin": [icons.out(b) for b in icons.builtins().values()],
+        every = icons.builtins().values()
+        return {"builtin": [icons.out(b) for b in every if not icons.is_symbol(b["id"])],
+                "symbols": [icons.out(b) for b in every if icons.is_symbol(b["id"])],
                 "mine": [icons.out(i) for i in icons.mine(s, user)]}
 
     @app.post("/api/icons", status_code=201)

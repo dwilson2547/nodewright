@@ -77,3 +77,58 @@ def sync(data: dict) -> None:
             port = find(nodes.get(e.get(node_key)), e[key]) if key in e else None
             if port is not None:
                 e[side_key] = port["side"]
+
+
+# --- orientation (design §15): styleAttributes rotate (90/180/270, clockwise)
+# and mirror ("horizontal", applied before rotating). The stored ports are
+# always where the pins are drawn; changing a node's orientation moves them.
+
+_CW = {"left": "top", "top": "right", "right": "bottom", "bottom": "left"}
+_MIRROR = {"left": "right", "right": "left", "top": "top", "bottom": "bottom"}
+
+
+def _point(p: dict) -> tuple[float, float]:
+    at, side = p["at"], p["side"]
+    return {"left": (0, at), "right": (1, at), "top": (at, 0), "bottom": (at, 1)}[side]
+
+
+def _at(side: str, x: float, y: float) -> float:
+    return round(y if side in ("left", "right") else x, 4)
+
+
+def _rotate_cw(p: dict) -> dict:
+    x, y = _point(p)
+    side = _CW[p["side"]]
+    return {**p, "side": side, "at": _at(side, 1 - y, x)}
+
+
+def _mirror(p: dict) -> dict:
+    x, y = _point(p)
+    side = _MIRROR[p["side"]]
+    return {**p, "side": side, "at": _at(side, 1 - x, y)}
+
+
+def orientation(style: dict | None) -> tuple[int, bool]:
+    style = style or {}
+    try:
+        r = int(style.get("rotate") or 0) % 360
+    except (TypeError, ValueError):
+        r = 0
+    return r, style.get("mirror") == "horizontal"
+
+
+def reorient(port_list: list[dict], old: tuple[int, bool], new: tuple[int, bool]) -> list[dict]:
+    """Ports drawn at orientation `old` moved to `new`: undo old (rotate back,
+    then unmirror), then apply new (mirror, then rotate)."""
+    out = []
+    for p in port_list:
+        for _ in range(((360 - old[0]) % 360) // 90):
+            p = _rotate_cw(p)
+        if old[1]:
+            p = _mirror(p)
+        if new[1]:
+            p = _mirror(p)
+        for _ in range(new[0] // 90):
+            p = _rotate_cw(p)
+        out.append(p)
+    return out

@@ -201,7 +201,31 @@ def _clean_style(el: dict, table: dict, where: str) -> None:
         del el[styles.KEY]
 
 
-def _clean_node(raw: dict, ids: set[str]) -> dict:
+NET_PORT = {"id": "net", "side": "left", "at": 0.5}
+SYMBOL_SIZE = 80
+
+
+def _symbol(n: dict, icon_ports: IconPorts | None, given: set[str]) -> None:
+    """A node showing an icon that has pins becomes a symbol (design §15): it
+    takes the pins as its ports (turned to the node's orientation), a square
+    size and no border, unless the caller gave those. A net label gets its
+    single pin."""
+    if "ports" not in given:
+        if n.get("icon") and icon_ports is not None:
+            found = icon_ports(n["icon"])
+            if found and found[0]:
+                pins, size = found
+                n["ports"] = ports.reorient(pins, (0, False), ports.orientation(n.get(styles.KEY)))
+                side = size or SYMBOL_SIZE
+                if "width" not in given and "height" not in given:
+                    n["width"] = n["height"] = side
+                sa = n.setdefault(styles.KEY, {})
+                sa.setdefault("border", "invisible")
+        elif (n.get(styles.KEY) or {}).get("shape") == "net":
+            n["ports"] = [dict(NET_PORT)]
+
+
+def _clean_node(raw: dict, ids: set[str], icon_ports: IconPorts | None = None) -> dict:
     if not isinstance(raw, dict):
         raise OpError("each node must be an object")
     n = {k: v for k, v in raw.items() if v is not None}
@@ -217,6 +241,7 @@ def _clean_node(raw: dict, ids: set[str]) -> dict:
         except ValueError as exc:
             raise OpError(str(exc)) from None
     _check_icon(n)
+    _symbol(n, icon_ports, set(n))
     if "schema" in n:
         _schema(n)
     if "id" in n:
@@ -250,6 +275,9 @@ def _schema_report(nodes: list[dict]) -> dict:
             out[n["id"]] = {"name": r["name"], "error": r["error"],
                             "fields": [f"{f['path']}: {f['type']}" for f in r["fields"]][:100]}
     return out
+
+
+IconPorts = Callable[[str], "tuple[list[dict], int | None] | None"]
 
 
 def _check_icon(n: dict) -> None:
@@ -291,16 +319,18 @@ def _ports(data: dict, checked: list[dict]) -> None:
     ports.sync(data)
 
 
-def add_elements(nodes: list[dict], edges: list[dict], direction: str = "TB"):
+def add_elements(nodes: list[dict], edges: list[dict], direction: str = "TB",
+                 icon_ports: IconPorts | None = None):
     """Op: add nodes and edges. Nodes may name a `group` (a new or existing
-    group node id) to be placed inside it. Unpositioned nodes are laid out."""
+    group node id) to be placed inside it. Unpositioned nodes are laid out.
+    `icon_ports(file)` finds an icon's pins, so symbols get their ports."""
     tb = direction.upper() != "LR"
 
     def op(data: dict) -> dict:
         existing = data["nodes"]
         by_id = {n["id"]: n for n in existing}
         ids = set(by_id) | {e["id"] for e in data["edges"]}
-        new = [_clean_node(n, ids) for n in nodes]
+        new = [_clean_node(n, ids, icon_ports) for n in nodes]
         new_edges = [_clean_edge(e, ids) for e in edges]
         new_by_id = {n["id"]: n for n in new}
 
@@ -414,8 +444,9 @@ def _anchor(container, top, children, boxes, block, all_nodes, every, edges, tb)
     return snap(bb[0]), snap(bb[3] + RANK_GAP * 2)
 
 
-def update_elements(updates: list[dict]):
-    """Op: set or remove (null) keys on existing nodes and edges."""
+def update_elements(updates: list[dict], icon_ports: IconPorts | None = None):
+    """Op: set or remove (null) keys on existing nodes and edges. Turning or
+    mirroring a node (styleAttributes rotate/mirror) moves its ports with it."""
 
     def op(data: dict) -> dict:
         index = {n["id"]: n for n in data["nodes"]} | {e["id"]: e for e in data["edges"]}
@@ -426,6 +457,7 @@ def update_elements(updates: list[dict]):
             target = index.get(u.get("id"))
             if target is None:
                 raise OpError(f"no node or edge with id {u.get('id')!r}")
+            was = ports.orientation(target.get(styles.KEY))
             for k, v in u["set"].items():
                 if k in IMMUTABLE:
                     raise OpError(f"{k} can't be changed; delete and re-add instead")
@@ -455,6 +487,13 @@ def update_elements(updates: list[dict]):
                     target[k] = v
             if "icon" in u["set"] and u["set"]["icon"] is not None:
                 _check_icon(target)
+                if not target.get("ports"):
+                    _symbol(target, icon_ports, set(u["set"]) | {"width", "height"})
+            elif styles.KEY in u["set"] and "fromNode" not in target and not target.get("ports"):
+                _symbol(target, None, set(u["set"]))  # became a net label
+            now = ports.orientation(target.get(styles.KEY))
+            if now != was and target.get("ports") and "ports" not in u["set"]:
+                target["ports"] = ports.reorient(target["ports"], was, now)
             if target.get("schema") is not None and ({"schema", "text"} & set(u["set"])):
                 _schema(target)
             if u.get("fit") and "type" in target and target["type"] != "group":

@@ -13,10 +13,13 @@ from __future__ import annotations
 
 NODE = {
     "shape": {"pill", "diamond", "parallelogram", "circle", "predefined-process", "document",
-              "database"},
+              "database", "net"},  # net: nodewright's net label (design §15)
     "border": {"dashed", "dotted", "invisible"},
     "textAlign": {"center", "right"},
     "iconColors": {"original"},  # nodewright's own: draw a node's icon in its own colours
+    # nodewright's own, for symbols (design §15): clockwise turn and left-right mirror.
+    "rotate": {"90", "180", "270"},
+    "mirror": {"horizontal"},
 }
 EDGE = {
     "path": {"dotted", "short-dashed", "long-dashed"},

@@ -126,9 +126,11 @@ def build(db: Database, settings: Settings, store: storage.Store | None = None,
                     versions.VersionError) as exc:
                 raise ToolError(str(exc)) from None
 
-    def write(ctx: Context, canvas_id: str, op) -> dict:
+    def write(ctx: Context, canvas_id: str, op=None, *, make=None) -> dict:
+        """Apply an ops function, or the one `make(session)` returns."""
         def go(s, user, who):
-            c, result = ops.mutate(s, user, canvas_id, who, op, settings.max_canvas_bytes)
+            fn = make(s) if make is not None else op
+            c, result = ops.mutate(s, user, canvas_id, who, fn, settings.max_canvas_bytes)
             return {**result, "revision": c.revision}
         return run(ctx, go)
 
@@ -277,7 +279,8 @@ def build(db: Database, settings: Settings, store: storage.Store | None = None,
         whose boxes now collide, which you should fix."""
         if not nodes and not edges:
             raise ToolError("nothing to add")
-        return write(ctx, canvas_id, ops.add_elements(nodes, edges, direction))
+        return write(ctx, canvas_id, make=lambda s: ops.add_elements(
+            nodes, edges, direction, lambda f: icons.ports_of(s, f)))
 
     @server.tool()
     def update_elements(ctx: Context, canvas_id: str,
@@ -292,7 +295,8 @@ def build(db: Database, settings: Settings, store: storage.Store | None = None,
         ports, fromPort/toPort, styleAttributes (see add_elements for the values).
         Setting a node's ports replaces the whole list; edges on a port that no
         longer exists keep their side."""
-        return write(ctx, canvas_id, ops.update_elements(updates))
+        return write(ctx, canvas_id, make=lambda s: ops.update_elements(
+            updates, lambda f: icons.ports_of(s, f)))
 
     @server.tool()
     def delete_elements(ctx: Context, canvas_id: str, ids: list[str]) -> dict:
@@ -329,16 +333,28 @@ def build(db: Database, settings: Settings, store: storage.Store | None = None,
 
     @server.tool()
     def list_icons(ctx: Context) -> dict:
-        """Icons you can put on text nodes: the user's own first, then built-ins
-        (Lucide line icons: server, database, cloud, user, lock, queue-like
-        inbox/send, ...). Show one by setting a text node's `icon` to the
-        icon's `file`; the node's text becomes its caption, so give it a
-        square-ish size (e.g. 120x120). Icons with `ports` were drawn with
-        connection points: copy them onto the node as its `ports`."""
+        """Icons you can put on text nodes: the user's own, built-in Lucide line
+        icons (server, database, cloud, user, lock, inbox/send, ...) and
+        schematic symbols (resistor, capacitor, diode, npn, nmos, op-amp, logic
+        gates, ground, supply, junction, ...). Show one by setting a text
+        node's `icon` to its `file`; the text becomes a caption, so give it a
+        square-ish size (e.g. 120x120).
+
+        Icons with `ports` (pins) are symbols: add_elements gives the node
+        those ports, a square size and no border, and its text is shown under
+        it (a designator/value such as "R1 10k"). Wire pins with edges'
+        fromPort/toPort. styleAttributes rotate ("90"/"180"/"270", clockwise)
+        and mirror ("horizontal") turn a symbol and move its ports with it.
+        A junction (sym-junction) joins three or more wires; a net label is a
+        text node with styleAttributes {"shape": "net"} and one port "net",
+        and labels with the same text are the same net."""
         def go(s, user, who):
             brief = lambda i: {k: i[k] for k in ("id", "name", "file", "ports")}  # noqa: E731
+            every = icons.builtins().values()
             return {"mine": [brief(icons.out(i)) for i in icons.mine(s, user)],
-                    "builtin": [brief(icons.out(b)) for b in icons.builtins().values()]}
+                    "builtin": [brief(icons.out(b)) for b in every if not icons.is_symbol(b["id"])],
+                    "symbols": [brief(icons.out(b)) | {"category": b["category"]}
+                                for b in every if icons.is_symbol(b["id"])]}
         return run(ctx, go)
 
     @server.tool()
