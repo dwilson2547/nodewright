@@ -51,6 +51,8 @@ export type Workspace = {
 export type Icon = {
   id: string; name: string; file: string; url: string; tinted: boolean; ports: Port[]; builtin: boolean;
   editable: boolean;
+  /** Built-in schematic symbols only (design §15): palette group and default size in px. */
+  category?: string; size?: number;
 };
 export type SchemaParse = {
   name: string | null; error: string | null; text: string; height: number; ports: Port[];
@@ -123,7 +125,7 @@ export const api = {
     call<ShareLink>("POST", `/api/canvases/${canvasId}/shares`, { all_tabs }),
   revokeShare: (id: string) => call("DELETE", `/api/shares/${id}`),
   parseSchema: (format: string, source: string) => call<SchemaParse>("POST", "/api/schemas/parse", { format, source }),
-  icons: () => call<{ builtin: Icon[]; mine: Icon[] }>("GET", "/api/icons"),
+  icons: () => call<{ builtin: Icon[]; symbols: Icon[]; mine: Icon[] }>("GET", "/api/icons"),
   getIcon: (id: string) => call<Icon & { source: unknown }>("GET", `/api/icons/${id}`),
   createIcon: (body: { name: string; svg: string; tinted: boolean; ports?: Port[]; source?: unknown }) =>
     call<Icon>("POST", "/api/icons", body),

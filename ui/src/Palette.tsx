@@ -119,16 +119,62 @@ function Icons({ editable, onIcon, fail }: {
   );
 }
 
+// Schematic symbols (design §15): built-in icons with pins, by category, and
+// net labels. Placed like icons; the symbol's pins become the node's ports.
+function Symbols({ editable, onIcon, onNetLabel, fail }: {
+  editable: boolean;
+  onIcon: (icon: Icon) => void;
+  onNetLabel: () => void;
+  fail: (e: unknown) => void;
+}) {
+  const [symbols, setSymbols] = useState<Icon[]>([]);
+  const [q, setQ] = useState("");
+  useEffect(() => { api.icons().then((r) => setSymbols(r.symbols), fail); }, [fail]);
+  const drag = (i: Icon) => (e: DragEvent) => {
+    e.dataTransfer.setData(ICON_DRAG_TYPE, JSON.stringify(i));
+    e.dataTransfer.effectAllowed = "copy";
+  };
+  const shown = symbols.filter((i) => !q || i.name.toLowerCase().includes(q.toLowerCase()));
+  const groups = [...new Set(shown.map((i) => i.category ?? ""))];
+  return (
+    <section>
+      <h5>Symbols</h5>
+      <input className="palette-search" type="search" placeholder="Search symbols" value={q}
+        onChange={(e) => setQ(e.target.value)} aria-label="Search symbols" />
+      {editable && (
+        <button className="palette-save" onClick={onNetLabel}
+          title="A named net: wires on labels with the same name are connected">+ Net label</button>
+      )}
+      {groups.map((g) => (
+        <div key={g}>
+          <div className="palette-sub">{g}</div>
+          <div className="palette-icons">
+            {shown.filter((i) => (i.category ?? "") === g).map((i) => (
+              <div key={i.id} className="palette-icon">
+                <button className="palette-insert" draggable={editable} disabled={!editable} onDragStart={drag(i)}
+                  onClick={() => onIcon(i)} title={editable ? `${i.name}: click to add, or drag` : i.name}>
+                  <span className="glyph" style={{ mask: `url("${i.url}") center / contain no-repeat`, WebkitMask: `url("${i.url}") center / contain no-repeat` }} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </section>
+  );
+}
+
 type Props = {
   editable: boolean;
   reloadKey: number;
   onInsert: (t: Template) => void;
   onIcon: (icon: Icon) => void;
+  onNetLabel: () => void;
   onSavePage: () => Promise<void>;
   onClose: () => void;
 };
 
-export function Palette({ editable, reloadKey, onInsert, onIcon, onSavePage, onClose }: Props) {
+export function Palette({ editable, reloadKey, onInsert, onIcon, onNetLabel, onSavePage, onClose }: Props) {
   const [list, setList] = useState<Template[]>([]);
   const [defaultPage, setDefaultPage] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -222,6 +268,7 @@ export function Palette({ editable, reloadKey, onInsert, onIcon, onSavePage, onC
           </section>
         );
       })}
+      <Symbols editable={editable} onIcon={onIcon} onNetLabel={onNetLabel} fail={fail} />
       <Icons editable={editable} onIcon={onIcon} fail={fail} />
       <p className="muted small">Select nodes and use <em>Save as template</em> to add your own shapes and snippets.</p>
     </aside>

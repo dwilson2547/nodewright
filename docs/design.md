@@ -228,7 +228,9 @@ of editor polish.
 5. **Next, in order** (✅ user, 2026-10-11): ✅ workspace zip export (0.9.0) → ✅ edge corner radius (0.10.0) →
    ✅ node ports (0.11.0) → ✅ icons and built-in set (0.12.0) → ✅ icon creator (0.13.0) →
    ✅ schema nodes (0.14.0) → ✅ versions (0.15.0, §14; ✅ user: per tab, not per schema or per
-   workspace) → schematics → manual edge waypoints → organisations and roles.
+   workspace) → ✅ schematic symbols, junctions and net labels (0.16.0, §15) → schematic wiring
+   mode (scope to discuss, ✅ user: after the pieces are in) → manual edge waypoints →
+   organisations and roles.
 6. **Stretch:** marketplace (§11.5), custom roles.
 
 Full MCP OAuth (§6.2) was pulled forward and shipped as 0.3.0 (✅ user asked for browser sign-in).
@@ -261,7 +263,7 @@ updates, style guides, shapes and line styles, templates, tab links, attachments
 `authorize()` with a members table (no sharing UI). 0.7.0 added folders, read-only share links,
 Alembic migrations, CI and the unused-attachment sweep. 0.8.0 added workspace members, 0.9.0 workspace zip
 export, 0.10.0 edge corner radius, 0.11.0 node ports, 0.12.0 icons, 0.13.0 icon creator, 0.14.0
-schema nodes, 0.15.0 versions. Not yet: organisations, zip import. Live updates are in-process, so the chart must stay at
+schema nodes, 0.15.0 versions, 0.16.0 schematic symbols. Not yet: organisations, zip import. Live updates are in-process, so the chart must stay at
 one replica until `events.py` moves to Postgres LISTEN/NOTIFY.
 
 ## 11. Future: collaboration and community 📐
@@ -514,3 +516,35 @@ own table, and a cross-tab restore while others edit those tabs.
 
 Not done: version history in the zip export, a visual diff of lines, workspace-wide snapshots,
 revision cleanup.
+
+## 15. Schematics ✅ (0.16.0, `symbols.py`, `ports.py` orientation, `nodes.tsx` SymbolNode)
+
+✅ user, 2026-10-11: symbol library, junctions and net labels now; a schematic-only wiring mode is
+to be discussed once these are in use (it would touch the edge router, which stays as is).
+
+- **Symbols** are built-in icons with pins (`symbols.py`, ids `sym-<name>`): 36 in five groups
+  (passive, semiconductors, sources and power, logic and ICs, switches and other). Each is drawn
+  in a 100x100 box with its leads running to the box edge, so a pin `{side, at}` is exactly where
+  a lead ends. `GET /api/icons` lists them under `symbols` with `category` and `size`.
+- A **symbol node** is any text node whose `icon` has ports. It is square (the drawing fills it;
+  the resizer keeps the aspect ratio), borderless, and shows its text under the box as a
+  caption ("R1 10k"), so the caption never moves the pins. Pin handles have no size of their own
+  (React Flow ends a line at the outer edge of a handle's box), so wires meet the leads; a
+  pseudo-element is the visible square and the grab area, shown on hover or selection.
+- **Orientation:** `styleAttributes.rotate` (90/180/270, clockwise) and `mirror` ("horizontal",
+  applied before rotating). The stored `ports` are always where the pins are drawn; changing the
+  orientation moves them (`ports.reorient` / `ports.ts` `turned`, `flipped`), and edge sides
+  follow. So anything that reads ports, Obsidian included, needs no knowledge of rotation. The
+  drawing is turned with a CSS transform `rotate(r) scaleX(-1)`.
+- **Junction** (`sym-junction`): a 16 px dot with a pin per side; three or more wires meet there.
+- **Net labels:** a text node with `shape: "net"`, drawn as a tag whose point is its one port
+  `net` (left; flipped, right). Labels with the same text (trimmed, case-insensitive) are the
+  same net: selecting one outlines the others and the toolbar counts them. Nothing else treats
+  them as connected yet.
+- **Agents:** `list_icons` returns `symbols`; `add_elements` turns a node whose `icon` has pins
+  into a symbol (ports in the node's orientation, square size, no border) unless it is given
+  ports or a size; `update_elements` moves ports when rotate/mirror change; a `shape: "net"` node
+  gets its port.
+
+Not done: a wiring mode (orthogonal routing that never crosses its own parts, wire-to-wire joins,
+splitting a wire with a junction), net-aware export, multi-unit parts and pin numbers.

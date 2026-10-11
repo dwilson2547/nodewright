@@ -53,3 +53,51 @@ export function nextPortId(ports: Port[]): string {
   while (used.has(`p${i}`)) i++;
   return `p${i}`;
 }
+
+// --- orientation (design §15, ports.py): styleAttributes rotate (90/180/270,
+// clockwise) and mirror ("horizontal", applied before rotating). Stored ports
+// are where the pins are drawn, so turning a node moves them.
+export type Orientation = { rotate: number; mirror: boolean };
+
+const CW: Record<Side, Side> = { left: "top", top: "right", right: "bottom", bottom: "left" };
+const point = (p: Port): [number, number] =>
+  p.side === "left" ? [0, p.at] : p.side === "right" ? [1, p.at] : p.side === "top" ? [p.at, 0] : [p.at, 1];
+const along = (side: Side, x: number, y: number) => Math.round((side === "left" || side === "right" ? y : x) * 1e4) / 1e4;
+
+function rotateCw(p: Port): Port {
+  const [x, y] = point(p);
+  const side = CW[p.side];
+  return { ...p, side, at: along(side, 1 - y, x) };
+}
+
+/** Mirror left-right in the node's own frame (and on screen, before any rotation). */
+export function mirrorPort(p: Port): Port {
+  const [x, y] = point(p);
+  const side: Side = p.side === "left" ? "right" : p.side === "right" ? "left" : p.side;
+  return { ...p, side, at: along(side, 1 - x, y) };
+}
+
+export function orientationOf(raw: Record<string, any> | undefined): Orientation {
+  const sa = raw?.styleAttributes ?? {};
+  return { rotate: (Number(sa.rotate) || 0) % 360, mirror: sa.mirror === "horizontal" };
+}
+
+/** Pins drawn upright at `pins`, placed at orientation `o` (as the server does for agents). */
+export function orient(pins: Port[], o: Orientation): Port[] {
+  return pins.map((p) => {
+    let q = o.mirror ? mirrorPort(p) : p;
+    for (let i = 0; i < o.rotate / 90; i++) q = rotateCw(q);
+    return q;
+  });
+}
+
+/** A quarter turn clockwise on screen: the new orientation and where the ports go. */
+export function turned(o: Orientation, ports: Port[]): [Orientation, Port[]] {
+  return [{ ...o, rotate: (o.rotate + 90) % 360 }, ports.map(rotateCw)];
+}
+
+/** A left-right flip on screen. Flipping after a turn r equals mirroring first
+ *  and turning by -r, which is how the drawing's transform is written. */
+export function flipped(o: Orientation, ports: Port[]): [Orientation, Port[]] {
+  return [{ rotate: (360 - o.rotate) % 360, mirror: !o.mirror }, ports.map(mirrorPort)];
+}

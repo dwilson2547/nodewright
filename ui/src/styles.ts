@@ -14,6 +14,7 @@ export const NODE_SHAPES: Option[] = [
   { value: "predefined-process", label: "Process" },
   { value: "document", label: "Document" },
   { value: "database", label: "Database" },
+  { value: "net", label: "Net label" },
 ];
 
 export const NODE_BORDERS: Option[] = [

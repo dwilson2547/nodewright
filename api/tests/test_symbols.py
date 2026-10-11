@@ -76,6 +76,13 @@ def test_agent_builds_a_circuit(mcp):  # noqa: F811
     assert {p["id"]: (p["side"], p["at"]) for p in q1["ports"]} == {
         "B": ("right", 0.5), "C": ("top", 0.3), "E": ("bottom", 0.3)}
 
+    # A flipped net label points right; its pin moves to that side.
+    m.call("update_elements", canvas_id=tab, updates=[
+        {"id": "vcc", "set": {"styleAttributes": {"mirror": "horizontal"}}}])
+    vcc = next(n for n in m.call("get_canvas", canvas_id=tab)["data"]["nodes"] if n["id"] == "vcc")
+    assert vcc["ports"] == [{"id": "net", "side": "right", "at": 0.5}]
+    assert vcc["styleAttributes"]["shape"] == "net"
+
     # Explicit ports win over the icon's pins.
     m.call("add_elements", canvas_id=tab, nodes=[
         {"id": "d1", "icon": file["sym-diode"], "ports": [{"id": "x", "side": "top"}], "width": 40, "height": 40}])

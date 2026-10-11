@@ -29,7 +29,7 @@ import {
 import { api, ApiError, CLIENT_ID, isMine, releaseOnUnload, type CanvasEvent, type Icon, type JsonCanvas, type SchemaParse, type Lease, type Template } from "./api";
 import { ICON_DRAG_TYPE } from "./icons";
 import { DRAG_TYPE, Palette } from "./Palette";
-import { endFields, portsOf, type Port } from "./ports";
+import { endFields, flipped, orient, orientationOf, portsOf, turned, type Orientation, type Port } from "./ports";
 import { PortsPanel } from "./PortsPanel";
 import { HistoryPanel, when } from "./HistoryPanel";
 import { ReadOnlyFlow } from "./ReadOnlyFlow";
@@ -43,7 +43,7 @@ import {
   type CEdge,
   type CNode,
 } from "./canvasMapping";
-import { nodeTypes, ReadOnly, SchemaOps } from "./nodes";
+import { isSymbol, netName, nodeTypes, ReadOnly, SchemaOps, SelectedNet } from "./nodes";
 import { formatForFile, SAMPLES, SCHEMA_FORMATS, type SchemaFormat } from "./schema";
 import { RoutedEdge } from "./edges";
 import { Markers } from "./markers";
@@ -54,6 +54,7 @@ import {
 } from "./styles";
 
 const edgeTypes = { routed: RoutedEdge };
+const NET_PORT: Port = { id: "net", side: "left", at: 0.5 };
 
 function Pick({ title, options, value, onChange }: {
   title: string; options: Option[]; value: string; onChange: (v: string) => void;
@@ -581,23 +582,26 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
   // no icon yet (so clicking several icons in a row adds several nodes),
   // otherwise a new icon node (caption = the icon's name) at `at` or in a free
   // spot. The node takes the icon's ports when it has none, and its colour mode.
+  // `at` (from a drop) is where the icon's centre goes.
   const placeIcon = (icon: Icon, at?: { x: number; y: number }) => {
     const iconFields = (raw: Record<string, any>) => {
       const next: Record<string, any> = withAttr({ ...raw, icon: icon.file }, "iconColors", icon.tinted ? "" : "original");
-      if (icon.ports.length && !portsOf(raw).length) next.ports = icon.ports;
+      if (icon.ports.length && !portsOf(raw).length) next.ports = orient(icon.ports, orientationOf(raw));
       return next;
     };
-    const target = !at && selNodes.length === 1 && selEdges.length === 0 && selNodes[0].data.raw.type === "text"
-      && !selNodes[0].data.raw.icon ? selNodes[0] : null;
+    // An icon with ports is a symbol (a schematic part, design §15): no border,
+    // the caption under it, and square, so its pins sit where its leads end.
+    // Symbols always make a new node; plain icons can go on the selected text box.
+    const symbol = icon.ports.length > 0;
+    const target = !at && !symbol && selNodes.length === 1 && selEdges.length === 0
+      && selNodes[0].data.raw.type === "text" && !selNodes[0].data.raw.icon ? selNodes[0] : null;
     if (target) {
       setNodes((ns) => ns.map((n) => (n.id === target.id ? { ...n, data: { raw: iconFields(n.data.raw) } } : n)));
       return;
     }
-    // An icon with ports is a symbol (a schematic part): no caption or border,
-    // and square, so its pins sit where the drawing's edges are.
-    const symbol = icon.ports.length > 0;
-    const [w, h] = symbol ? [80, 80] : [120, 120];
-    const pos = at ?? freeSpot(w, h);
+    const side = symbol ? icon.size ?? 80 : 120;
+    const [w, h] = [side, side];
+    const pos = at ? { x: at.x - w / 2, y: at.y - h / 2 } : freeSpot(w, h);
     let raw = iconFields({
       id: newId(), type: "text", text: symbol ? "" : icon.name, x: snapTo(pos.x), y: snapTo(pos.y), width: w, height: h,
     });
@@ -716,7 +720,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
     if (iconData && !readOnly) {
       e.preventDefault();
       const at = flow.screenToFlowPosition({ x: e.clientX, y: e.clientY });
-      placeIcon(JSON.parse(iconData) as Icon, { x: at.x - 60, y: at.y - 60 });
+      placeIcon(JSON.parse(iconData) as Icon, at);
       return;
     }
     const id = e.dataTransfer.getData(DRAG_TYPE);
@@ -884,6 +888,37 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
   const setNodeAttr = (key: string, value: string, only?: (n: CNode) => boolean) => {
     const ids = new Set(selNodes.filter((n) => !only || only(n)).map((n) => n.id));
     setNodes((ns) => ns.map((n) => ids.has(n.id) ? { ...n, data: { raw: withAttr(n.data.raw, key, value) } } : n));
+    // A net label's one pin is its point (design §15).
+    if (key === "shape" && value === "net") {
+      for (const n of selNodes) if (ids.has(n.id) && !portsOf(n.data.raw).length) setPorts(n.id, [{ ...NET_PORT }], undefined, withAttr(n.data.raw, "shape", "net"));
+    }
+  };
+
+  // Turn or flip the selected symbols (and flip net labels) on screen; their
+  // ports move with them and their wires follow (ports.ts turned/flipped).
+  const reorient = (how: (o: Orientation, ps: Port[]) => [Orientation, Port[]]) => {
+    for (const n of selNodes) {
+      const net = attr(n.data.raw, "shape") === "net" && how === flipped;
+      if (!isSymbol(n.data.raw) && !net) continue;
+      const [o, ps] = how(orientationOf(n.data.raw), portsOf(n.data.raw));
+      let raw = withAttr(n.data.raw, "rotate", o.rotate ? String(o.rotate) : "");
+      raw = withAttr(raw, "mirror", o.mirror ? "horizontal" : "");
+      setPorts(n.id, ps, undefined, raw);
+    }
+  };
+
+  const addNetLabel = () => {
+    const name = prompt("Net name", "VCC")?.trim();
+    if (!name) return;
+    const [w, h] = [Math.max(60, 24 + name.length * 9), 30];
+    const pos = freeSpot(w, h);
+    const raw = withAttr(withAttr({
+      id: newId(), type: "text", text: name, x: snapTo(pos.x), y: snapTo(pos.y), width: w, height: h, ports: [{ ...NET_PORT }],
+    }, "shape", "net"), "textAlign", "center");
+    const node: CNode = {
+      id: raw.id, type: "text", position: { x: raw.x, y: raw.y }, width: w, height: h, zIndex: 1, data: { raw }, selected: true,
+    };
+    setNodes((ns) => [...ns.map((n) => ({ ...n, selected: false })), node]);
   };
 
   const setEdgeAttr = (key: string, value: string) => {
@@ -954,11 +989,18 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
   const oneNode = selNodes.length === 1 && selEdges.length === 0 ? selNodes[0] : null;
   const nodeRaws = selNodes.map((n) => n.data.raw);
   const textRaws = nodeRaws.filter((r) => r.type === "text");
+  const symbolCount = nodeRaws.filter(isSymbol).length;
+  const netLabelCount = textRaws.filter((r) => attr(r, "shape") === "net").length;
+  // One net label selected: the others on its net light up, and the toolbar counts them.
+  const net = oneNode && attr(oneNode.data.raw, "shape") === "net" ? netName(oneNode.data.raw) : null;
+  const netCount = net === null ? 0
+    : nodes.filter((n) => attr(n.data.raw, "shape") === "net" && netName(n.data.raw) === net).length;
   const edgeRaws = selEdges.map((e) => e.data!.raw);
 
   return (
     <ReadOnly.Provider value={readOnly}>
     <SchemaOps.Provider value={readOnly ? null : applySchema}>
+    <SelectedNet.Provider value={net}>
     <div className={"editor" + (readOnly ? " readonly" : "") + (paletteOpen && !preview ? " with-palette" : "")
       + (historyOpen ? " with-history" : "") + (dropping ? " drop-files" : "")}
       ref={wrapper} onDoubleClick={onPaneDoubleClick} onDragOver={onDragOver} onDragLeave={onDragLeave}
@@ -1109,6 +1151,18 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
                 <button onClick={(e) => onEdgeDoubleClick(e, oneEdge)}>Label…</button>
               </>
             )}
+            {symbolCount + netLabelCount > 0 && (
+              <>
+                <span className="sep" />
+                {symbolCount > 0 && <button onClick={() => reorient(turned)} title="Turn 90° clockwise; wires stay on their pins">⟳ Rotate</button>}
+                <button onClick={() => reorient(flipped)} title="Mirror left to right; wires stay on their pins">⇋ Flip</button>
+              </>
+            )}
+            {net !== null && (
+              <span className="muted" title="Wires on net labels with the same name are connected">
+                net “{oneNode!.data.raw.text}”: {netCount} label{netCount === 1 ? "" : "s"}
+              </span>
+            )}
             {oneNode && (
               <>
                 <span className="sep" />
@@ -1180,7 +1234,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
       )}
       {paletteOpen && !preview && (
         <Palette editable={!readOnly} reloadKey={tplReload} onInsert={(t) => insertTemplate(t)}
-          onIcon={(i) => placeIcon(i)}
+          onIcon={(i) => placeIcon(i)} onNetLabel={addNetLabel}
           onSavePage={savePage} onClose={() => setPaletteOpen(false)} />
       )}
       {labelEdit && (
@@ -1199,6 +1253,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
         />
       )}
     </div>
+    </SelectedNet.Provider>
     </SchemaOps.Provider>
     </ReadOnly.Provider>
   );

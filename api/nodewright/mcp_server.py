@@ -346,8 +346,9 @@ def build(db: Database, settings: Settings, store: storage.Store | None = None,
         fromPort/toPort. styleAttributes rotate ("90"/"180"/"270", clockwise)
         and mirror ("horizontal") turn a symbol and move its ports with it.
         A junction (sym-junction) joins three or more wires; a net label is a
-        text node with styleAttributes {"shape": "net"} and one port "net",
-        and labels with the same text are the same net."""
+        text node with styleAttributes {"shape": "net"} (its port "net" is
+        added for you; mirror "horizontal" points it right), and labels with
+        the same text are the same net."""
         def go(s, user, who):
             brief = lambda i: {k: i[k] for k in ("id", "name", "file", "ports")}  # noqa: E731
             every = icons.builtins().values()

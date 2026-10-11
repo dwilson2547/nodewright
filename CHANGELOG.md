@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.16.0 - 2026-10-11
+
+### Added
+- **Symbols** in the palette: 36 schematic symbols in five groups (resistors, capacitors,
+  inductors, diodes, LEDs, BJTs, MOSFETs, sources, ground and supply, op-amp, logic gates,
+  switches, lamp, motor, antenna, terminal). Click or drag to place; each pin is a connection
+  point where its lead ends, so wires meet the drawing.
+- A symbol's text shows under it as a caption (designator and value, e.g. "R1 10k");
+  double-click to edit.
+- **⟳ Rotate** and **⇋ Flip** for selected symbols; pins and their wires move with the drawing.
+- Junction dots, and **+ Net label**: a tag-shaped label with one pin. Selecting one outlines
+  the other labels with the same name and counts them. Net labels can be flipped to point right.
+- MCP: `list_icons` lists `symbols`; agents place a symbol by its `icon` and get its pins as
+  ports, and can rotate/mirror it with `styleAttributes`.
+
+### Changed
+- `GET /api/icons` returns symbols separately (`symbols`) from the Lucide icons (`builtin`).
+- New styleAttributes for nodes: `rotate`, `mirror`; new shape `net`.
+
 ## 0.15.0 - 2026-10-11
 
 ### Added

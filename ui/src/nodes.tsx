@@ -5,7 +5,7 @@ import { Markdown, safeUrl } from "./markdown";
 import { api, type SchemaParse } from "./api";
 import { iconUrl } from "./icons";
 import { highlight, SCHEMA_FORMATS, unfence, type SchemaFormat } from "./schema";
-import { portHandle, portsOf, type Port } from "./ports";
+import { orientationOf, portHandle, portsOf, type Port } from "./ports";
 import { attr } from "./styles";
 import { attachmentOf, TabLinksContext, isCanvasFile, linkTarget, subpathNode } from "./tablinks";
 
@@ -27,6 +27,11 @@ const along = (p: Port): CSSProperties =>
 /** How the editor applies a schema node's parse result (fenced text, height,
  * ports) so its lines follow; absent on read-only pages. */
 export const SchemaOps = createContext<((id: string, parsed: SchemaParse) => void) | null>(null);
+
+/** The net (lower-cased text) of the selected net label, so labels on the same
+ * net light up (design §15). */
+export const SelectedNet = createContext<string | null>(null);
+export const netName = (raw: Record<string, any>) => String(raw.text ?? "").trim().toLowerCase();
 
 // Last parse per format+source, so headers and errors show without re-asking.
 const parsed = new Map<string, SchemaParse | "pending">();
@@ -139,16 +144,24 @@ const OUTLINES: Record<string, ReactNode> = {
   "predefined-process": <><rect x="0" y="0" width="100" height="100" /><path className="line" d="M8 0V100M92 0V100" /></>,
   document: <path d="M0 0H100V86C80 72 62 98 36 95C18 93 8 87 0 89Z" />,
   database: <><path d="M0 10A50 10 0 0 1 100 10V90A50 10 0 0 1 0 90Z" /><path className="line" d="M0 10A50 10 0 0 0 100 10" /></>,
+  // A net label: a tag whose point is its one pin (port "net", left side).
+  net: <polygon points="0,50 14,0 100,0 100,100 14,100" />,
 };
+
+const NET_FLIPPED = <polygon points="100,50 86,0 0,0 0,100 86,100" />;
+
+/** A text node showing an icon with pins: a schematic symbol (design §15). */
+export const isSymbol = (raw: Record<string, any>) => !!raw.icon && portsOf(raw).length > 0;
 
 /** Class names and outline for a node's style attributes (styles.ts). */
 function look(raw: Record<string, any>, kind: string, shapes = false) {
   const shape = shapes ? attr(raw, "shape") : "";
   const border = attr(raw, "border");
   const align = attr(raw, "textAlign");
-  const outline = OUTLINES[shape];
+  // A net label flipped (styleAttributes.mirror) points right; its pin moved with it.
+  const outline = shape === "net" && attr(raw, "mirror") === "horizontal" ? NET_FLIPPED : OUTLINES[shape];
   let cls = `nw-node nw-${kind}`;
-  if (shape) cls += ` shaped shape-${shape}` + (outline ? " svgshape" : "");
+  if (shape) cls += ` shaped shape-${shape}` + (outline ? " svgshape" : "") + (outline === NET_FLIPPED ? " flipped" : "");
   if (border) cls += ` border-${border}`;
   if (align) cls += ` align-${align}`;
   const svg = outline ? (
@@ -225,10 +238,37 @@ function IconView({ raw }: { raw: Record<string, any> }) {
   );
 }
 
+// A symbol's drawing fills its square node, turned and mirrored as the node
+// is (its ports were moved to match, ports.ts); the caption ("R1 10k") sits
+// under it, outside the box, so it never shifts the pins.
+function SymbolNode({ id, raw, selected, cls }: { id: string; raw: Record<string, any>; selected: boolean; cls: string }) {
+  const ed = useEditable(id, raw, "text");
+  const o = orientationOf(raw);
+  const transform = `rotate(${o.rotate}deg)` + (o.mirror ? " scaleX(-1)" : "");
+  return (
+    <div className={cls + " has-icon nw-symbol"} style={colorStyle(raw)} onDoubleClick={ed.start}>
+      <div className="nw-symbol-art" style={{ transform }}><IconView raw={raw} /></div>
+      <NodeResizer isVisible={selected} minWidth={12} minHeight={12} keepAspectRatio />
+      <Handles id={id} raw={raw} />
+      {ed.editing ? (
+        <div className="nw-symbol-caption editing">
+          <Editor value={ed.draft} onChange={ed.setDraft} onCommit={ed.commit} onCancel={ed.cancel} multiline />
+        </div>
+      ) : raw.text ? (
+        <div className="nw-symbol-caption"><Markdown text={raw.text} /></div>
+      ) : null}
+    </div>
+  );
+}
+
 export const TextNode = memo(({ id, data, selected }: NodeProps<CNode>) => {
   const raw = data.raw;
   const ed = useEditable(id, raw, "text");
-  const { cls, svg } = look(raw, "text", true);
+  const net = useContext(SelectedNet);
+  const { cls: base, svg } = look(raw, "text", true);
+  const sameNet = attr(raw, "shape") === "net" && net !== null && !selected && netName(raw) === net;
+  const cls = base + (sameNet ? " nw-net-match" : "");
+  if (isSymbol(raw)) return <SymbolNode id={id} raw={raw} selected={!!selected} cls={cls} />;
   if (raw.schema) {
     const h = Number(raw.height) || 60;
     return (
