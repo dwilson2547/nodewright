@@ -103,6 +103,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
   const [focus, setFocus] = useState<{ canvas: string; node: string } | null>(null);
   const linked = useRef<string | null>(linkedCanvas());
   const editor = useRef<EditorHandle>(null);
@@ -216,9 +217,20 @@ export default function App() {
   };
 
   const exportTab = () => {
+    setExportOpen(false);
     const doc = editor.current?.exportDoc();
     const t = tabs.find((x) => x.id === tabId);
     if (doc && t) download(t.name, JSON.stringify(doc, null, "\t"));
+  };
+
+  // Save pending edits first, so the zip (built from the server's copy) has them.
+  const exportWorkspace = async () => {
+    setExportOpen(false);
+    if (!wsId) return;
+    await editor.current?.flush();
+    const a = document.createElement("a");
+    a.href = `/api/workspaces/${wsId}/export`;
+    a.click();
   };
 
   const newWorkspace = async (folderId: string | null = null) => {
@@ -324,7 +336,18 @@ export default function App() {
         <span className="grow" />
         <span className={"status s-" + status}>{STATUS_TEXT[status]}</span>
         {editable && <button onClick={() => fileInput.current?.click()} title="Open a .canvas file as a new tab">Import</button>}
-        <button onClick={exportTab} title="Download this tab as a .canvas file">Export</button>
+        <span className="menu-anchor" onMouseLeave={() => setExportOpen(false)}>
+          <button onClick={() => setExportOpen((v) => !v)} aria-expanded={exportOpen}>Export ▾</button>
+          {exportOpen && (
+            <div className="sb-menu" role="menu">
+              <button role="menuitem" onClick={exportTab} disabled={!tabId}>This tab (.canvas)</button>
+              <button role="menuitem" onClick={() => void exportWorkspace()}
+                title="Every tab and the files they show; unzipped, it opens as an Obsidian vault">
+                Whole workspace (.zip)
+              </button>
+            </div>
+          )}
+        </span>
         <input ref={fileInput} type="file" accept=".canvas,application/json" hidden onChange={(e) => {
           const f = e.target.files?.[0];
           e.target.value = "";

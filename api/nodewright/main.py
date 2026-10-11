@@ -22,8 +22,8 @@ from mcp.server.auth.settings import ClientRegistrationOptions, RevocationOption
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict
 from starlette.routing import Route
 
-from . import (__version__, access, attachments, auth, canvas_format, events, folders, leases,
-               members, mcp_server, oauth, oidc, render, shares, storage, styleguide, templates, tokens)
+from . import (__version__, access, attachments, auth, bundle, canvas_format, events, folders,
+               leases, members, mcp_server, oauth, oidc, render, shares, storage, styleguide, templates, tokens)
 from .config import Settings
 from .db import Database
 from .models import (AccessToken, Attachment, Canvas, CanvasRevision, OAuthGrant, ShareLink, StyleGuide,
@@ -531,6 +531,15 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
                          .where(CanvasRevision.canvas_id == c.id)
                          .order_by(CanvasRevision.revision.desc()).limit(REVISION_LIST_LIMIT))
         return [{"revision": r, "source": src, "created_at": _iso(at)} for r, src, at in rows]
+
+    @app.get("/api/workspaces/{ws_id}/export")
+    def export_workspace(ws_id: str, user: User = Depends(user_dep), s: Session = Depends(session)):
+        """Every tab as a .canvas plus the attachments they show, as a zip (bundle.py)."""
+        ws = workspace_for(s, user, ws_id)
+        name = bundle.safe_name(ws.name, "workspace") + ".zip"
+        return StreamingResponse(bundle.build(s, ws, store), media_type="application/zip",
+                                 headers={"Content-Disposition":
+                                          "attachment; filename*=UTF-8''" + quote(name)})
 
     @app.get("/api/canvases/{canvas_id}/export")
     def export_canvas(canvas_id: str, user: User = Depends(user_dep),

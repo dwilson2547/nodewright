@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.9.0 - 2026-10-11
+
+### Added
+- Workspace zip export: **Export ▾ → Whole workspace (.zip)** downloads every tab as a `.canvas`
+  plus the attachments they show, laid out so the unzipped folder opens as an Obsidian vault.
+  Includes `.nodewright/workspace.json` (tab order, workspace name) for a later import.
+  `GET /api/workspaces/{id}/export`.
+
+### Fixed
+- Images in the editor showed as missing since 0.7.0: the share-link page set the attachment URL
+  when its module loaded, which happens on every page, so the editor asked the share route with an
+  empty token. Share and render pages now set it only when they render.
+
 ## 0.8.0 - 2026-10-11
 
 ### Added

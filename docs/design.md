@@ -56,7 +56,7 @@ Loading only checks `styleAttributes` is an object of strings, so newer plugin v
 agent writes are checked strictly against the table. Snap and grid size are a per-browser editor
 preference, not stored in the canvas. Manual edge waypoints: not built.
 
-### 3.3 Documents and links ✅ (0.4.0, except zip export)
+### 3.3 Documents and links ✅ (0.4.0; zip export 0.9.0)
 
 - A **workspace** is a folder; each **tab** is one `.canvas` document in it.
 - Links between documents use spec `file` nodes: `file: "<tab name>.canvas"`, optional
@@ -68,8 +68,16 @@ preference, not stored in the canvas. Manual edge waypoints: not built.
   a download. Deleting the node doesn't delete the file, since undo and revisions may still point
   at it; a sweep (at start-up + 5 min, then every 6 h) deletes attachments that no canvas, no
   template and no revision from the last `ATTACHMENT_KEEP_DAYS` (30) uses, once they are that
-  old (0.7.0). Deleting the workspace deletes them all. Exports don't embed them yet.
-- Not built: export a workspace as a zip of `.canvas` files + attachments; import the same.
+  old (0.7.0). Deleting the workspace deletes them all. A single-tab `.canvas` export doesn't
+  embed them; the workspace zip does.
+- **Workspace zip export** ✅ (0.9.0, `bundle.py`, `GET /api/workspaces/{id}/export`, any member):
+  `<tab name>.canvas` per tab, `attachments/<id>/<name>` for each attachment a current tab shows,
+  and `.nodewright/workspace.json` (workspace name, tab order, version, attachments missing from
+  storage). Canvases are written unchanged, since file and tab-link paths are already
+  vault-relative, so the unpacked folder opens as an Obsidian vault. Tab names are reduced to
+  filename-safe characters and repeats get " (2)"; a tab link whose name lost characters to that
+  no longer matches its file. Built in a spooled temp file (memory to 8 MB, then disk). The UI
+  saves pending edits before downloading. Not built: zip import, which the manifest is for.
 
 ## 4. Templates ✅ (0.4.0)
 
@@ -215,7 +223,7 @@ of editor polish.
    approved the migration).
 4. **Sharing:** ✅ (0.7.0) read-only share links (§9) and folders (§11.2); ✅ (0.8.0) workspace
    members (§11.1). Organisations with built-in roles come last in the order below.
-5. **Next, in order** (✅ user, 2026-10-11): workspace zip export → edge corner radius → custom
+5. **Next, in order** (✅ user, 2026-10-11): ✅ workspace zip export (0.9.0) → edge corner radius → custom
    icons and node ports → schema nodes (§12) and schematics → manual edge waypoints →
    organisations and roles.
 6. **Stretch:** marketplace (§11.5), custom roles.
@@ -248,8 +256,8 @@ Phase 1 ✅ deployed 2026-10-11 as 0.1.0; phase 2 ✅ as 0.2.0, MCP OAuth sign-i
 phase as 0.4.0 (see `CHANGELOG.md`): MCP server, access tokens, auto-layout, edit leases, SSE live
 updates, style guides, shapes and line styles, templates, tab links, attachments, and
 `authorize()` with a members table (no sharing UI). 0.7.0 added folders, read-only share links,
-Alembic migrations, CI and the unused-attachment sweep. 0.8.0 added workspace members. Not yet:
-organisations, zip export. Live updates are in-process, so the chart must stay at
+Alembic migrations, CI and the unused-attachment sweep. 0.8.0 added workspace members, 0.9.0 workspace zip
+export. Not yet: organisations, zip import. Live updates are in-process, so the chart must stay at
 one replica until `events.py` moves to Postgres LISTEN/NOTIFY.
 
 ## 11. Future: collaboration and community 📐

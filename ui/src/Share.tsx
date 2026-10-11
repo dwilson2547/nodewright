@@ -16,7 +16,6 @@ import { setAttachmentUrl, TabLinksContext } from "./tablinks";
 const edgeTypes = { routed: RoutedEdge };
 const token = decodeURIComponent(location.pathname.replace(/^\/s\//, "").split("/")[0] ?? "");
 const base = `/api/s/${encodeURIComponent(token)}`;
-setAttachmentUrl((id) => `${base}/attachments/${id}`);
 
 type Shared = { id: string; name: string; workspace: string; tabs: CanvasMeta[]; nodes: CNode[]; edges: CEdge[] };
 
@@ -74,6 +73,9 @@ function View({ doc, focus, open }: { doc: Shared; focus?: string; open: (id: st
 }
 
 export default function Share() {
+  // Here, not at module load: main.tsx imports every page, so a module-level
+  // call would also redirect the editor's attachments.
+  setAttachmentUrl((id) => `${base}/attachments/${id}`);
   const [doc, setDoc] = useState<Shared | null>(null);
   const [focus, setFocus] = useState<string | undefined>();
   const [error, setError] = useState<string | null>(null);

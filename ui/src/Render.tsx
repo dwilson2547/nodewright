@@ -17,8 +17,6 @@ const canvasId = q.get("canvas") ?? "";
 const ticket = q.get("t") ?? "";
 const focus = (q.get("focus") ?? "").split(",").filter(Boolean);
 
-setAttachmentUrl((id) =>
-  `/api/render/${encodeURIComponent(canvasId)}/attachments/${id}?t=${encodeURIComponent(ticket)}`);
 
 type Loaded = { nodes: CNode[]; edges: CEdge[]; tabs: CanvasMeta[] };
 
@@ -85,6 +83,9 @@ function Shot({ doc }: { doc: Loaded }) {
 }
 
 export default function Render() {
+  // Not at module load: main.tsx imports every page (see Share.tsx).
+  setAttachmentUrl((id) =>
+    `/api/render/${encodeURIComponent(canvasId)}/attachments/${id}?t=${encodeURIComponent(ticket)}`);
   const [doc, setDoc] = useState<Loaded | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
