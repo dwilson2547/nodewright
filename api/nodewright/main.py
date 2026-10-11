@@ -19,7 +19,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 from mcp.server.auth.routes import create_auth_routes, create_protected_resource_routes
 from mcp.server.auth.settings import ClientRegistrationOptions, RevocationOptions
-from pydantic import AnyHttpUrl
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict
 from starlette.routing import Route
 
 from . import (__version__, access, auth, canvas_format, events, leases, mcp_server, oauth,
@@ -72,6 +72,12 @@ def _canvas_meta(c: Canvas) -> dict:
 
 def _filename(name: str) -> str:
     return (re.sub(r"[^A-Za-z0-9 _.-]", "", name).strip() or "canvas") + ".canvas"
+
+
+class _Issuer(BaseModel):
+    # RFC 8414 clients compare the issuer exactly; keep it free of a trailing slash.
+    model_config = ConfigDict(url_preserve_empty_path=True)
+    u: AnyHttpUrl
 
 
 def create_app(settings: Settings | None = None, provider: oidc.Provider | None = None) -> FastAPI:
@@ -521,7 +527,7 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
 
     # RFC 8414 wants an https issuer; plain http is only allowed on loopback.
     if settings.secure or urlsplit(settings.public_url).hostname in ("localhost", "127.0.0.1"):
-        issuer = AnyHttpUrl(settings.public_url)
+        issuer = _Issuer(u=settings.public_url).u
         app.router.routes.extend(create_auth_routes(
             oauth.Provider(db, settings.public_url), issuer_url=issuer,
             client_registration_options=ClientRegistrationOptions(

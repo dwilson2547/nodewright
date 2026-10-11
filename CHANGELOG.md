@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.3.1]
+
+### Fixed
+- OAuth issuer in authorization-server metadata no longer has a trailing slash (RFC 8414 exact match).
+
 ## 0.3.0 - 2026-10-11
 
 ### Added
