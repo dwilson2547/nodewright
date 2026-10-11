@@ -168,6 +168,7 @@ Built in 0.2.0 (✅ verified with the MCP Python SDK client against a local serv
 | `layout` | Re-place all or some nodes; groups move with their contents and refit |
 | `lock_canvas`, `unlock_canvas` | Explicit lease for long builds (§11.3) |
 | `get_style_guide` | The user's style guide (§11.4) |
+| `render_canvas` | PNG of the canvas (or `node_ids` and their surroundings) as the editor draws it, so an agent can check its work (0.6.0) |
 
 Still planned: `apply_template` (§4), `link_canvases` (§3.3).
 
@@ -183,9 +184,16 @@ is an orthogonal A* over a sparse grid of lines 20 px outside every node, with a
 `overlaps` (pairs of colliding node ids) so an agent can check its work without `get_canvas`.
 
 Agent feedback 2026-10-11 (from a web Claude session using the MCP): wanted a `render_canvas` tool
-returning an image so an agent can see its result. Not built: the choice between rendering the
-real editor in headless Chromium (exact, shares routing, needs a browser container) and a separate
-server-side SVG renderer (light, but a second renderer to keep in step) is waiting on the user.
+returning an image so an agent can see its result. Built in 0.6.0 on the real editor in headless
+Chromium rather than a second, server-side SVG renderer, so the picture always matches what the
+user sees, routing included. The tool issues a one-time ticket (in memory, 60 s, revoked when the
+call returns) scoped to that canvas and its workspace's attachments, and asks the cluster's
+browserless (`browserless.scrape-stack.svc:3000`, shared with the scrapers) to screenshot
+`/render?canvas=&t=` through the in-cluster service. That page is a read-only, chrome-free
+React Flow view that sets `#nw-render[data-ready]` once nodes are measured, the view is fitted and
+images have loaded. The viewport is the drawing's size plus padding, at most 1600 px a side. The
+tool is only registered when `BROWSERLESS_URL` is set. Tickets in process memory assume the single
+replica the chart already pins.
 
 Key rule: nodes added without coordinates are placed by the layout engine. Every tool call is one
 revision, so a bad agent edit is one undo away.

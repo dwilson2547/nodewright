@@ -27,6 +27,11 @@ class Settings:
     attachments_dir: str | None = None
     """Local alternative to S3 (development); attachments are off with neither."""
     max_attachment_bytes: int = 20 * 1024 * 1024
+    browserless_url: str | None = None
+    """browserless (headless Chromium) for render_canvas, e.g.
+    http://browserless.scrape-stack.svc:3000; render_canvas is off without it."""
+    render_base_url: str | None = None
+    """Where that browser reaches this app (in-cluster service URL); defaults to public_url."""
     dev_login: bool = False
     """Local-only sign-in without authentik, for development and UI tests.
     Refused when public_url is https, so it can't be switched on in prod."""
@@ -63,5 +68,7 @@ class Settings:
             s3_region=env.get("S3_REGION") or cls.s3_region,
             attachments_dir=env.get("ATTACHMENTS_DIR") or None,
             max_attachment_bytes=int(env.get("MAX_ATTACHMENT_BYTES") or cls.max_attachment_bytes),
+            browserless_url=env.get("BROWSERLESS_URL") or None,
+            render_base_url=env.get("RENDER_BASE_URL") or None,
             dev_login=(env.get("DEV_LOGIN") or "") == "1",
         )

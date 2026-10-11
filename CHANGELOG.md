@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.0 - 2026-10-11
+
+### Added
+- `render_canvas` MCP tool: returns a PNG of the canvas, or of chosen nodes and their
+  surroundings, drawn by the real editor in the cluster's headless Chromium (browserless). Agents
+  can check their own work instead of waiting for a screenshot from the user. Enabled by
+  `render.browserlessUrl` in the chart.
+
 ## 0.5.0 - 2026-10-11
 
 From agent feedback after testing the MCP against prod.

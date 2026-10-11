@@ -36,9 +36,16 @@ export const subpathNode = (subpath?: string) => (subpath ? subpath.replace(/^#\
 const ATTACHMENT = /^attachments\/([0-9a-f]{32})(?:\/(.*))?$/;
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|avif)$/i;
 
+let attachmentUrl = (id: string) => `/api/attachments/${id}`;
+
+/** The render view (Render.tsx) has no session; it fetches attachments by ticket. */
+export function setAttachmentUrl(fn: (id: string) => string) {
+  attachmentUrl = fn;
+}
+
 export function attachmentOf(file: string): { id: string; name: string; url: string; image: boolean } | undefined {
   const m = ATTACHMENT.exec(file);
   if (!m) return undefined;
   const name = m[2] || "file";
-  return { id: m[1], name, url: `/api/attachments/${m[1]}`, image: IMAGE_EXT.test(name) };
+  return { id: m[1], name, url: attachmentUrl(m[1]), image: IMAGE_EXT.test(name) };
 }

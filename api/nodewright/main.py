@@ -23,7 +23,7 @@ from pydantic import AnyHttpUrl, BaseModel, ConfigDict
 from starlette.routing import Route
 
 from . import (__version__, access, attachments, auth, canvas_format, events, leases,
-               mcp_server, oauth, oidc, storage, styleguide, templates, tokens)
+               mcp_server, oauth, oidc, render, storage, styleguide, templates, tokens)
 from .config import Settings
 from .db import Database
 from .models import (AccessToken, Attachment, Canvas, CanvasRevision, OAuthGrant, StyleGuide, Template, User,
@@ -104,7 +104,8 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
     if settings.dev_login and not settings.dev_login_enabled:
         log.warning("DEV_LOGIN ignored: PUBLIC_URL is https")
 
-    mcp, mcp_app = mcp_server.build(db, settings, store)
+    tickets = render.Tickets()
+    mcp, mcp_app = mcp_server.build(db, settings, store, tickets)
 
     @contextlib.asynccontextmanager
     async def lifespan(_app):
@@ -114,7 +115,7 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
     app = FastAPI(title="nodewright", version=__version__, docs_url=None, redoc_url=None,
                   openapi_url=None, lifespan=lifespan)
     app.state.settings, app.state.db, app.state.broker = settings, db, broker
-    app.state.store = store
+    app.state.store, app.state.tickets = store, tickets
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
@@ -593,11 +594,42 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
     @app.get("/api/attachments/{att_id}")
     def get_attachment(att_id: str, user: User = Depends(user_dep),
                        s: Session = Depends(session)):
-        st = need_store()
         a = s.get(Attachment, att_id)
         if a is None:
             raise HTTPException(404, "no such attachment")
         workspace_for(s, user, a.workspace_id)
+        return serve_attachment(a)
+
+    # --- render view (render.py): read-only, by ticket instead of cookie -------
+
+    def ticket_for(canvas_id: str, t: str | None) -> render.Ticket:
+        ticket = tickets.get(t)
+        if ticket is None or ticket.canvas_id != canvas_id:
+            raise HTTPException(404, "no such render")
+        return ticket
+
+    @app.get("/api/render/{canvas_id}")
+    def render_canvas_data(canvas_id: str, t: str | None = None, s: Session = Depends(session)):
+        ticket_for(canvas_id, t)
+        c = s.get(Canvas, canvas_id)
+        if c is None:
+            raise HTTPException(404, "no such render")
+        tabs = s.scalars(select(Canvas).where(Canvas.workspace_id == c.workspace_id)
+                         .order_by(Canvas.position)).all()
+        return {"id": c.id, "name": c.name, "data": c.data,
+                "tabs": [_canvas_meta(x) for x in tabs]}
+
+    @app.get("/api/render/{canvas_id}/attachments/{att_id}")
+    def render_attachment(canvas_id: str, att_id: str, t: str | None = None,
+                          s: Session = Depends(session)):
+        ticket = ticket_for(canvas_id, t)
+        a = s.get(Attachment, att_id)
+        if a is None or a.workspace_id != ticket.workspace_id:
+            raise HTTPException(404, "no such attachment")
+        return serve_attachment(a)
+
+    def serve_attachment(a: Attachment) -> StreamingResponse:
+        st = need_store()
         try:
             body = st.get(a.key)
         except KeyError:

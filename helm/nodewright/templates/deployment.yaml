@@ -67,6 +67,12 @@ spec:
                   key: S3_SECRET_KEY
             {{- end }}
             {{- end }}
+            {{- if .Values.render.browserlessUrl }}
+            - name: BROWSERLESS_URL
+              value: {{ .Values.render.browserlessUrl | quote }}
+            - name: RENDER_BASE_URL
+              value: "http://{{ .Release.Name }}.{{ .Release.Namespace }}.svc"
+            {{- end }}
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

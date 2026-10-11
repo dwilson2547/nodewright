@@ -2,7 +2,7 @@ image:
   repository: dwilson2547/nodewright
   # A release from CHANGELOG.md. Bumping this is how a release reaches the
   # cluster; :latest is pushed too, but the chart doesn't follow it.
-  tag: "0.5.0"
+  tag: "0.6.0"
   pullPolicy: IfNotPresent
 
 # Public (Traefik pubsecure, letsencrypt-prod, external-dns). Everything but
@@ -34,6 +34,12 @@ attachments:
   bucket: nodewright
   secretName: nodewright-bucket-credentials
   maxBytes: 20971520
+
+# render_canvas MCP tool: a headless browser screenshots /render through
+# the in-cluster service (design §7). Shared with the scrapers, which cap it at
+# 5 concurrent sessions. Leave empty to disable the tool.
+render:
+  browserlessUrl: http://browserless.scrape-stack.svc:3000
 
 # One replica: the schema is created at startup (create_all), and two pods
 # racing that on first boot is the one thing that could go wrong. All state is

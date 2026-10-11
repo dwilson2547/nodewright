@@ -16,13 +16,13 @@ from sqlalchemy.orm import Session
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from mcp.server.mcpserver import Context, MCPServer
+from mcp.server.mcpserver import Context, Image, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.streamable_http_manager import StreamableHTTPASGIApp
 from mcp.server.transport_security import TransportSecuritySettings
 
-from . import (__version__, access, attachments, canvas_format, leases, ops, storage, styleguide,
-               styles, templates, tokens)
+from . import (__version__, access, attachments, canvas_format, leases, ops, render, storage,
+               styleguide, styles, templates, tokens)
 from .config import Settings
 from .db import Database
 from .models import Attachment, Canvas, User, Workspace
@@ -52,7 +52,8 @@ grouped as tabs in workspaces. You are acting for the signed-in user who connect
   list_workspaces; links follow the name, so rename the link if you rename the tab.
 - Files the user uploaded (screenshots, logos, PDFs) are listed by list_attachments; show
   one with a file node whose `file` is the attachment's `file` value. Images render inline.
-- The user sees your changes live in their browser.
+- The user sees your changes live in their browser. If render_canvas is available, use it
+  to look at your result and fix what reads wrong before you finish.
 """
 
 NODE_STYLE = ("styleAttributes (optional object; omit a key for the default): "
@@ -98,8 +99,8 @@ class McpAuth:
         await self.inner(scope, receive, send)
 
 
-def build(db: Database, settings: Settings,
-          store: storage.Store | None = None) -> tuple[MCPServer, ASGIApp]:
+def build(db: Database, settings: Settings, store: storage.Store | None = None,
+          tickets: render.Tickets | None = None) -> tuple[MCPServer, ASGIApp]:
     server = MCPServer(name="nodewright", version=__version__, instructions=INSTRUCTIONS,
                        website_url=settings.public_url)
 
@@ -306,6 +307,40 @@ def build(db: Database, settings: Settings,
                 raise ToolError(str(exc)) from None
             return {"template_id": t.id, "kind": t.kind, "nodes": len(t.data["nodes"])}
         return run(ctx, go)
+
+    if settings.browserless_url and tickets is not None:
+        @server.tool()
+        def render_canvas(ctx: Context, canvas_id: str,
+                          node_ids: Annotated[list[str] | None, Field(
+                              description="Zoom to just these nodes (and what lies between "
+                                          "them); omit for the whole canvas.")] = None
+                          ) -> list[Image | str]:
+            """A PNG of the canvas exactly as the editor draws it (shapes, routed
+            edges, labels, images). Look at it after building or changing a
+            diagram and fix what reads wrong: edges crossing nodes, labels on
+            top of lines, overlaps, cramped or lopsided layout. Up to 1600 px a
+            side; a big canvas is scaled down, so pass node_ids to inspect an
+            area closely."""
+            def go(s, user, who):
+                c = access.canvas(s, user, canvas_id)
+                if node_ids:
+                    known = {n["id"] for n in c.data.get("nodes", [])}
+                    missing = sorted(set(node_ids) - known)
+                    if missing:
+                        raise ToolError(f"no such nodes: {missing[:10]}")
+                return c.workspace_id, render.viewport(c.data, node_ids), c.revision
+            ws_id, size, revision = run(ctx, go)
+            token = tickets.issue(canvas_id, ws_id)
+            try:
+                url = render.page_url(settings.render_base_url or settings.public_url,
+                                      canvas_id, token, node_ids)
+                png = render.screenshot(settings.browserless_url, url, size)
+            except render.RenderError as exc:
+                raise ToolError(str(exc)) from None
+            finally:
+                tickets.revoke(token)
+            return [Image(data=png, format="png"),
+                    f"revision {revision}, {size[0]}x{size[1]} px"]
 
     @server.tool()
     def list_attachments(ctx: Context, workspace_id: str) -> dict:
