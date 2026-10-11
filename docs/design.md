@@ -164,12 +164,15 @@ Resolved 2026-10-10 (✅ user):
 
 - **Public** at `https://nodewright.danwils.com`. Who may sign up is controlled in authentik.
 - **Attachments** in AIStor (§5).
-
-Open:
-
-- **Read-only share links** — a URL that lets someone *without an account* view one canvas.
-  Proposed: nodewright serves its own read-only view (same renderer as the editor, so style
+- **Read-only share links** are rendered by nodewright itself (same renderer as the editor, so style
   extensions and cross-canvas links work), behind an unguessable, revocable token. Not via
-  `meta/canvas-viewer`: its CSP (`connect-src 'self'`) only loads files from its own origin, so it
-  cannot fetch from nodewright, and it does not understand the §3.2 extensions. canvas-viewer stays
-  the tool for loose `.canvas` files. Awaiting confirmation.
+  `meta/canvas-viewer`: its CSP (`connect-src 'self'`) only loads files from its own origin and it
+  does not understand the §3.2 extensions. canvas-viewer stays the simple tool for loose `.canvas`
+  files. Not built yet.
+
+## 10. Status
+
+Phase 1 ✅ deployed 2026-10-11 as 0.1.0 (see `CHANGELOG.md`). Beyond the phase-1 line it already has
+snap-to-grid (10/20/40 px), edge colour/arrow ends/labels, undo/redo and `.canvas` import/export.
+Not yet: shapes and edge line styles (§3.2), templates (§4), share links, MCP, attachments, Alembic
+(schema is `create_all` at startup, so the first schema change needs migrations set up).
