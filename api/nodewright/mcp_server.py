@@ -46,6 +46,10 @@ grouped as tabs in workspaces. You are acting for the signed-in user who connect
 - list_templates shows ready-made stencils, fragments and pages (the user's own and
   built-ins); apply_template drops one onto a canvas. Prefer the user's templates when they
   fit. save_template keeps part of a canvas for reuse.
+- To link one tab to another (e.g. an overview whose boxes open detail diagrams), add a
+  file node with {"file": "<tab name>.canvas"} and optionally {"subpath": "#<node id>"}
+  to land on a node; the user clicks it to open that tab. Tab names come from
+  list_workspaces; links follow the name, so rename the link if you rename the tab.
 - The user sees your changes live in their browser.
 """
 
@@ -181,7 +185,9 @@ def build(db: Database, settings: Settings) -> tuple[MCPServer, ASGIApp]:
     def add_elements(ctx: Context, canvas_id: str,
                      nodes: Annotated[list[dict], Field(
                          description="Nodes to add. type: text (default; `text` is Markdown), "
-                                     "link (`url`), file (`file`) or group (`label`). Optional: "
+                                     "link (`url`), file (`file`; '<tab name>.canvas' links to that tab "
+                                     "of the workspace, with optional subpath '#<node id>') or "
+                                     "group (`label`). Optional: "
                                      "id, color ('1'-'6' or '#rrggbb'), group (id of a group "
                                      "node to put it in), x/y/width/height (omit to auto-place "
                                      "and auto-size). " + NODE_STYLE)] = [],  # noqa: B006

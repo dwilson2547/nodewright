@@ -153,3 +153,20 @@ def test_mcp_templates(mcp):  # noqa: F811
     c = m.call("create_canvas", workspace_id=m.call("list_workspaces")["workspaces"][0]["id"],
                name="Arch", template="builtin:architecture")
     assert len(m.call("get_canvas", canvas_id=c["canvas_id"])["data"]["nodes"]) == 9
+
+
+# --- cross-canvas links --------------------------------------------------------
+
+def test_mcp_tab_links(mcp):  # noqa: F811
+    m, _ = mcp
+    ws = m.call("list_workspaces")["workspaces"][0]
+    tab = ws["canvases"][0]
+    detail = m.call("create_canvas", workspace_id=ws["id"], name="Detail", template="builtin:blank")
+    m.call("add_elements", canvas_id=detail["canvas_id"], nodes=[{"id": "db", "text": "DB"}])
+    m.call("add_elements", canvas_id=tab["id"],
+           nodes=[{"id": "go", "type": "file", "file": "Detail.canvas", "subpath": "#db"}])
+    node = [n for n in m.call("get_canvas", canvas_id=tab["id"])["data"]["nodes"] if n["id"] == "go"][0]
+    assert node["file"] == "Detail.canvas" and node["subpath"] == "#db"
+    assert node["width"] > 0 and node["height"] > 0
+    tools = {t["name"]: t for t in m.rpc("tools/list").json()["result"]["tools"]}
+    assert "<tab name>.canvas" in str(tools["add_elements"]["inputSchema"])

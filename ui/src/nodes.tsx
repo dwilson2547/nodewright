@@ -3,6 +3,7 @@ import { Handle, NodeResizer, Position, useReactFlow, type NodeProps } from "@xy
 import { resolveColor, type CNode } from "./canvasMapping";
 import { Markdown, safeUrl } from "./markdown";
 import { attr } from "./styles";
+import { TabLinksContext, isCanvasFile, linkTarget, subpathNode } from "./tablinks";
 
 const SIDES: [string, Position][] = [
   ["top", Position.Top],
@@ -165,16 +166,37 @@ export const LinkNode = memo(({ id, data, selected }: NodeProps<CNode>) => {
   );
 });
 
+function CanvasLink({ raw }: { raw: Record<string, any> }) {
+  const links = useContext(TabLinksContext);
+  const target = linkTarget(String(raw.file ?? ""), links.tabs);
+  const node = subpathNode(raw.subpath);
+  const name = String(raw.file).slice(0, -".canvas".length);
+  return (
+    <div className="nw-body">
+      <div className="nw-kind">tab link</div>
+      {target ? (
+        <button className="nodrag nw-tablink" title={node ? `Open "${target.name}" at node ${node}` : `Open "${target.name}"`}
+          onClick={(e) => { e.stopPropagation(); links.open(target.id, node); }}>
+          {target.id === links.current ? "↺ " : "→ "}{target.name}{node ? <span className="muted"> #{node}</span> : null}
+        </button>
+      ) : (
+        <span className="muted" title="No tab with that name in this workspace">{name} (missing tab)</span>
+      )}
+    </div>
+  );
+}
+
 export const FileNode = memo(({ id, data, selected }: NodeProps<CNode>) => {
   const raw = data.raw;
   const ed = useEditable(id, raw, "file");
+  const tabLink = isCanvasFile(String(raw.file ?? ""));
   return (
-    <div className={look(raw, "file").cls} style={colorStyle(raw)} onDoubleClick={ed.start}>
+    <div className={look(raw, "file").cls + (tabLink ? " nw-canvaslink" : "")} style={colorStyle(raw)} onDoubleClick={ed.start}>
       <NodeResizer isVisible={selected} minWidth={80} minHeight={30} />
       <Handles />
       {ed.editing ? (
         <Editor value={ed.draft} onChange={ed.setDraft} onCommit={ed.commit} onCancel={ed.cancel} multiline={false} />
-      ) : (
+      ) : tabLink ? <CanvasLink raw={raw} /> : (
         <div className="nw-body">
           <div className="nw-kind">file</div>
           <span>{raw.file}{raw.subpath ?? ""}</span>

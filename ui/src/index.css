@@ -156,3 +156,8 @@ input[type="color"] { width: 24px; height: 22px; padding: 0; border: none; backg
 .palette-error { color: var(--danger); font-size: 12px; cursor: pointer; }
 .palette .small { font-size: 11px; margin-top: 12px; }
 .toolbar button.on { border-color: var(--accent); color: var(--accent); }
+
+/* tab links (file nodes pointing at "<tab>.canvas") */
+.nw-canvaslink { border-style: solid; border-left-width: 4px; }
+.nw-tablink { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: none; border: none; padding: 0; font: inherit; color: var(--accent, #6d4aff); cursor: pointer; text-align: left; }
+.nw-tablink:hover { text-decoration: underline; }

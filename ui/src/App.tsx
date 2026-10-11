@@ -3,6 +3,7 @@ import { ReactFlowProvider } from "@xyflow/react";
 import { api, ApiError, type CanvasMeta, type Config, type Me, type Workspace } from "./api";
 import { Editor, type EditorHandle, type SaveStatus } from "./Editor";
 import { AgentSettings } from "./Settings";
+import { TabLinksContext } from "./tablinks";
 
 const STATUS_TEXT: Record<SaveStatus, string> = {
   loading: "Loading…",
@@ -94,6 +95,7 @@ export default function App() {
   const [status, setStatus] = useState<SaveStatus>("loading");
   const [error, setError] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [focus, setFocus] = useState<{ canvas: string; node: string } | null>(null);
   const linked = useRef<string | null>(linkedCanvas());
   const editor = useRef<EditorHandle>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -156,6 +158,16 @@ export default function App() {
     if (id === tabId) return;
     await leave();
     setTabId(id);
+  };
+
+  // A tab link: open the tab (saving this one first) and focus its #node.
+  const followLink = async (id: string, node?: string) => {
+    if (id === tabId) {
+      if (node) editor.current?.focusNode(node);
+      return;
+    }
+    setFocus(node ? { canvas: id, node } : null);
+    await openTab(id);
   };
 
   const switchWorkspace = async (id: string) => {
@@ -278,9 +290,12 @@ export default function App() {
       )}
       <main>
         {tabId && (
-          <ReactFlowProvider key={tabId}>
-            <Editor ref={editor} canvasId={tabId} onStatus={setStatus} />
-          </ReactFlowProvider>
+          <TabLinksContext.Provider value={{ tabs, current: tabId, open: (id, node) => void followLink(id, node) }}>
+            <ReactFlowProvider key={tabId}>
+              <Editor ref={editor} canvasId={tabId} onStatus={setStatus}
+                focusNode={focus?.canvas === tabId ? focus.node : undefined} />
+            </ReactFlowProvider>
+          </TabLinksContext.Provider>
         )}
       </main>
       {settingsOpen && <AgentSettings onClose={() => setSettingsOpen(false)} />}

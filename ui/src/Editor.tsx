@@ -1,6 +1,7 @@
 import {
   forwardRef,
   useCallback,
+  useContext,
   useEffect,
   useImperativeHandle,
   useRef,
@@ -37,6 +38,7 @@ import {
 } from "./canvasMapping";
 import { nodeTypes, ReadOnly } from "./nodes";
 import { Markers } from "./markers";
+import { canvasFile, TabLinksContext } from "./tablinks";
 import {
   EDGE_ARROWS, EDGE_PATHS, EDGE_ROUTES, LINE_WIDTHS, NODE_BORDERS, NODE_SHAPES, TEXT_ALIGN,
   attr, withAttr, type Option,
@@ -59,7 +61,11 @@ function common(raws: Record<string, any>[], key: string): string {
 }
 
 export type SaveStatus = "loading" | "saved" | "unsaved" | "saving" | "conflict" | "locked" | "error";
-export type EditorHandle = { flush: () => Promise<boolean>; exportDoc: () => JsonCanvas | null };
+export type EditorHandle = {
+  flush: () => Promise<boolean>;
+  exportDoc: () => JsonCanvas | null;
+  focusNode: (id: string) => void;
+};
 
 const SAVE_DEBOUNCE_MS = 700;
 const RETRY_MS = 5000;
@@ -69,6 +75,7 @@ const SIZES: Record<string, [number, number]> = {
   text: [260, 80],
   group: [480, 320],
   link: [320, 70],
+  file: [260, 70],
 };
 
 type SnapPrefs = { on: boolean; size: number };
@@ -87,9 +94,9 @@ function splitDoc(doc: JsonCanvas) {
   return extra;
 }
 
-type Props = { canvasId: string; onStatus: (s: SaveStatus) => void };
+type Props = { canvasId: string; onStatus: (s: SaveStatus) => void; focusNode?: string };
 
-export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId, onStatus }, ref) {
+export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId, onStatus, focusNode }, ref) {
   const [nodes, setNodes, onNodesChange] = useNodesState<CNode>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<CEdge>([]);
   const [loaded, setLoaded] = useState(false);
@@ -106,6 +113,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
   const otherLease = lease && !isMine(lease) ? lease : null;
   const readOnly = !canEdit || !!otherLease;
   const flow = useReactFlow<CNode, CEdge>();
+  const tabLinks = useContext(TabLinksContext);
   const wrapper = useRef<HTMLDivElement>(null);
 
   const extra = useRef<Record<string, unknown>>({});
@@ -140,6 +148,16 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
     return JSON.stringify(toCanvas(f.nodes, f.edges, extra.current));
   }, [setNodes, setEdges]);
 
+  // Centre a node (a tab link's #subpath) and select it; false if it's gone.
+  const showNode = useCallback((id: string) => {
+    const n = flow.getNode(id);
+    if (!n) return false;
+    setNodes((ns) => ns.map((x) => (x.selected !== (x.id === id) ? { ...x, selected: x.id === id } : x)));
+    flow.fitView({ nodes: [{ id }], padding: 0.5, maxZoom: 1, duration: 300 });
+    return true;
+  }, [flow, setNodes]);
+  const initialFocus = useRef(focusNode);
+
   // --- load -----------------------------------------------------------------
   useEffect(() => {
     let alive = true;
@@ -157,14 +175,18 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
         redo.current = [];
         setLoaded(true);
         setStatus("saved");
-        requestAnimationFrame(() => flow.fitView({ padding: 0.2, maxZoom: 1 }));
+        requestAnimationFrame(() => {
+          const want = initialFocus.current;
+          initialFocus.current = undefined;
+          if (!want || !showNode(want)) flow.fitView({ padding: 0.2, maxZoom: 1 });
+        });
       },
       (e) => alive && setLoadError(String(e.message || e)),
     );
     return () => {
       alive = false;
     };
-  }, [canvasId, apply, flow, setStatus]);
+  }, [canvasId, apply, flow, setStatus, showNode]);
 
   // --- saving -----------------------------------------------------------------
   const save = useCallback(async (): Promise<boolean> => {
@@ -328,7 +350,10 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
   useImperativeHandle(ref, () => ({
     flush,
     exportDoc: () => (loaded ? JSON.parse(serialize()) : null),
-  }), [flush, loaded, serialize]);
+    focusNode: (id: string) => {
+      if (!showNode(id)) flash(`That link points at node ${id}, which isn't on this tab any more.`);
+    },
+  }), [flush, loaded, serialize, showNode, flash]);
 
   useEffect(() => {
     const warn = (e: BeforeUnloadEvent) => {
@@ -377,18 +402,40 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
   // --- editing helpers --------------------------------------------------------
   const snapTo = (v: number) => (snap.on ? Math.round(v / snap.size) * snap.size : Math.round(v));
 
-  const addNode = (type: "text" | "group" | "link", at?: { x: number; y: number }) => {
-    const [w, h] = SIZES[type];
-    let pos = at;
-    if (!pos) {
-      const r = wrapper.current!.getBoundingClientRect();
-      pos = flow.screenToFlowPosition({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
-      pos = { x: pos.x - w / 2, y: pos.y - h / 2 };
+  // Where a click-inserted w×h box goes: the free grid slot nearest the view
+  // centre (so repeated clicks don't stack), panned into view if need be.
+  const freeSpot = (w: number, h: number) => {
+    const r = wrapper.current!.getBoundingClientRect();
+    const c = flow.screenToFlowPosition({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
+    const base = { x: c.x - w / 2, y: c.y - h / 2 };
+    const boxes = flow.getNodes().map((n) => ({
+      x: n.position.x, y: n.position.y,
+      w: n.measured?.width ?? n.width ?? 0, h: n.measured?.height ?? n.height ?? 0,
+    }));
+    const hits = (p: { x: number; y: number }) =>
+      boxes.some((b) => p.x < b.x + b.w + 20 && p.x + w + 20 > b.x && p.y < b.y + b.h + 20 && p.y + h + 20 > b.y);
+    const slots: { x: number; y: number; d: number }[] = [];
+    for (let i = -6; i <= 6; i++) for (let j = -6; j <= 6; j++) {
+      slots.push({ x: base.x + i * (w + 40), y: base.y + j * (h + 40), d: Math.hypot(i * (w + 40), j * (h + 40)) });
     }
+    slots.sort((a, b) => a.d - b.d);
+    const pos = slots.find((s) => !hits(s)) ?? base;
+    const tl = flow.screenToFlowPosition({ x: r.left, y: r.top });
+    const br = flow.screenToFlowPosition({ x: r.right, y: r.bottom });
+    if (pos.x < tl.x || pos.y < tl.y || pos.x + w > br.x || pos.y + h > br.y) {
+      setTimeout(() => flow.setCenter(pos.x + w / 2, pos.y + h / 2, { zoom: flow.getZoom(), duration: 300 }), 0);
+    }
+    return pos;
+  };
+
+  const addNode = (type: "text" | "group" | "link" | "file", at?: { x: number; y: number }, file?: string) => {
+    const [w, h] = SIZES[type];
+    const pos = at ?? freeSpot(w, h);
     const raw: Record<string, any> = { id: newId(), type, x: snapTo(pos.x), y: snapTo(pos.y), width: w, height: h };
     if (type === "text") raw.text = "";
     if (type === "group") raw.label = "Group";
     if (type === "link") raw.url = "https://";
+    if (type === "file") raw.file = file ?? "";
     const node: CNode = {
       id: raw.id, type, position: { x: raw.x, y: raw.y }, width: w, height: h,
       zIndex: type === "group" ? 0 : 1, data: { raw }, selected: true,
@@ -397,38 +444,12 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
   };
 
   // A template is a JSON Canvas fragment starting at (0, 0): copy it with
-  // fresh ids, its top-left at `at` (flow coordinates) or centred in view.
+  // fresh ids, its top-left at `at` (flow coordinates) or in a free spot.
   const insertTemplate = (t: Template, at?: { x: number; y: number }) => {
     const src: any[] = t.data.nodes ?? [];
     if (src.length === 0) return;
     const w = Math.max(...src.map((n) => n.x + n.width)), h = Math.max(...src.map((n) => n.y + n.height));
-    let pos = at;
-    if (!pos) {
-      const r = wrapper.current!.getBoundingClientRect();
-      const c = flow.screenToFlowPosition({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
-      pos = { x: c.x - w / 2, y: c.y - h / 2 };
-      // Repeated clicks would stack inserts on top of each other: take the
-      // free grid slot nearest the view centre, then make sure it's visible.
-      const boxes = flow.getNodes().map((n) => ({
-        x: n.position.x, y: n.position.y,
-        w: n.measured?.width ?? n.width ?? 0, h: n.measured?.height ?? n.height ?? 0,
-      }));
-      const hits = (p: { x: number; y: number }) =>
-        boxes.some((b) => p.x < b.x + b.w + 20 && p.x + w + 20 > b.x && p.y < b.y + b.h + 20 && p.y + h + 20 > b.y);
-      const base = pos;
-      const slots: { x: number; y: number; d: number }[] = [];
-      for (let i = -6; i <= 6; i++) for (let j = -6; j <= 6; j++) {
-        slots.push({ x: base.x + i * (w + 40), y: base.y + j * (h + 40), d: Math.hypot(i * (w + 40), j * (h + 40)) });
-      }
-      slots.sort((a, b) => a.d - b.d);
-      pos = slots.find((s) => !hits(s)) ?? base;
-      const vis = flow.screenToFlowPosition({ x: r.right, y: r.bottom });
-      const tl = flow.screenToFlowPosition({ x: r.left, y: r.top });
-      if (pos.x < tl.x || pos.y < tl.y || pos.x + w > vis.x || pos.y + h > vis.y) {
-        const p = pos;
-        setTimeout(() => flow.setCenter(p.x + w / 2, p.y + h / 2, { zoom: flow.getZoom(), duration: 300 }), 0);
-      }
-    }
+    const pos = at ?? freeSpot(w, h);
     const ox = snapTo(pos.x), oy = snapTo(pos.y);
     const ids = new Map<string, string>();
     const nodesRaw = src.map((n) => {
@@ -674,6 +695,16 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
           <button onClick={() => addNode("text")} title="Add a text card (or double-click the canvas)">+ Text</button>
           <button onClick={() => addNode("group")}>+ Group</button>
           <button onClick={() => addNode("link")}>+ Link</button>
+          {tabLinks.tabs.length > 1 && (
+            <select value="" aria-label="Link to tab" title="Add a card that opens another tab of this workspace"
+              onChange={(e) => {
+                const t = tabLinks.tabs.find((x) => x.id === e.target.value);
+                if (t) addNode("file", undefined, canvasFile(t.name));
+              }}>
+              <option value="">+ Tab link…</option>
+              {tabLinks.tabs.filter((t) => t.id !== canvasId).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          )}
           <button className={paletteOpen ? "on" : ""} onClick={() => setPaletteOpen(!paletteOpen)}
             title="Shapes, snippets and page templates">Templates</button>
           <span className="sep" />
