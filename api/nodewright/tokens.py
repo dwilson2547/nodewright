@@ -1,6 +1,7 @@
 """Personal access tokens: how an MCP client acts as a user.
 
-Only `/mcp` accepts them; the REST API stays cookie-only, so a leaked token
+OAuth-issued tokens (oauth.py) are the other kind; `principal` resolves
+either. Only `/mcp` accepts them; the REST API stays cookie-only, so a leaked token
 can draw diagrams but cannot mint more tokens or change the style guide.
 """
 
@@ -13,6 +14,7 @@ from datetime import timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from . import oauth
 from .models import AccessToken, User, utcnow
 
 PREFIX = "nwp_"
@@ -61,3 +63,14 @@ def out(row: AccessToken) -> dict:
     return {"id": row.id, "name": row.name, "prefix": row.prefix,
             "created_at": row.created_at.isoformat(),
             "last_used_at": row.last_used_at.isoformat() if row.last_used_at else None}
+
+
+def principal(s: Session, raw: str) -> oauth.Principal | None:
+    """Resolve an MCP bearer token: a personal access token or an OAuth one."""
+    if not raw:
+        return None
+    if raw.startswith(PREFIX):
+        tok = verify(s, raw)
+        return tok and oauth.Principal(tok.user, tok.id, f"{tok.user.username}'s agent ({tok.name})")
+    g = oauth.grant_for_access(s, raw)
+    return g and oauth.Principal(g.user, g.id, f"{g.user.username}'s agent ({g.client_name})")

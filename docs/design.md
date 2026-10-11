@@ -124,9 +124,20 @@ supports either; and the exact current MCP auth spec revision — re-read it bef
 Plan, in order:
 1. ✅ (0.2.0) **Personal access tokens** (v1): created in the nodewright UI, scoped to the user, sent as
    `Authorization: Bearer`. Works with any MCP client that accepts static headers.
-2. **Full MCP OAuth** (later): nodewright acts as the authorization server for MCP clients
-   (handles registration, issues its own tokens) and delegates the actual login to authentik — the
-   same "authentik for identity, app issues tokens" split as 6.1.
+2. ✅ (0.3.0) **Full MCP OAuth**: nodewright acts as the authorization server for MCP clients
+   and delegates the actual login to authentik — the same "authentik for identity, app issues
+   tokens" split as 6.1. Built on the MCP SDK's `mcp.server.auth` handlers (metadata, RFC 7591
+   registration, PKCE S256, token, revoke); `api/nodewright/oauth.py` stores clients, pending
+   requests, codes and grants, and renders the consent page. Verified with the SDK's
+   `OAuthClientProvider` against a local server and with a browser click-through of the
+   consent page (2026-10-11). ⚠ unverified: Claude Code, VS Code and Copilot CLI against prod.
+   - Registration is open (that's how MCP clients work), so redirect URIs must be https,
+     http on loopback, or an app scheme; clients never approved are pruned after a day; the
+     consent page shows the redirect host because the client name is self-asserted.
+   - Access tokens `nwo_` live 1 h, refresh tokens `nwr_` 60 days, rotated together on refresh.
+     One `oauth_grants` row per connected app; deleting it disconnects the app.
+   - The consent form posts to self and 303s to the client; browsers apply CSP `form-action`
+     to that redirect, so the consent response widens `form-action` to the redirect origin.
 
 ## 7. MCP server 📐
 
@@ -169,7 +180,9 @@ of editor polish.
 3. **Editor:** shapes and edge line styles (§3.2), templates and default pages (§4), folders (§11.2),
    attachments (AIStor).
 4. **Sharing:** read-only share links, workspace members, organisations with built-in roles (§11.1).
-5. **Stretch:** marketplace (§11.5), custom roles, full MCP OAuth, workspace zip import/export.
+5. **Stretch:** marketplace (§11.5), custom roles, workspace zip import/export.
+
+Full MCP OAuth (§6.2) was pulled forward and shipped as 0.3.0 (✅ user asked for browser sign-in).
 
 Each phase ends deployed to the cluster. Biggest risk is editor polish being bottomless; each phase
 needs an explicit stop line.
@@ -188,7 +201,7 @@ Resolved 2026-10-10 (✅ user):
 
 ## 10. Status
 
-Phase 1 ✅ deployed 2026-10-11 as 0.1.0; phase 2 ✅ as 0.2.0 (see `CHANGELOG.md`): MCP server,
+Phase 1 ✅ deployed 2026-10-11 as 0.1.0; phase 2 ✅ as 0.2.0, MCP OAuth sign-in as 0.3.0 (see `CHANGELOG.md`): MCP server,
 access tokens, auto-layout, edit leases, SSE live updates, style guides, and `authorize()` with a
 members table (no sharing UI). Not yet: shapes and edge line styles (§3.2), templates (§4), folders,
 share links, attachments, Alembic (schema is `create_all` at startup, which only adds tables; the

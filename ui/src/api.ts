@@ -57,6 +57,7 @@ export type CanvasEvent =
   | { type: "lease"; lease: Lease | null };
 export type Token = { id: string; name: string; prefix: string; created_at: string; last_used_at: string | null };
 export type NewToken = Token & { token: string; mcp_url: string };
+export type Grant = { id: string; client_name: string; created_at: string; last_used_at: string | null };
 export type StyleGuide = { text: string; is_default: boolean };
 
 export const api = {
@@ -84,6 +85,8 @@ export const api = {
   tokens: () => call<Token[]>("GET", "/api/tokens"),
   createToken: (name: string) => call<NewToken>("POST", "/api/tokens", { name }),
   revokeToken: (id: string) => call("DELETE", `/api/tokens/${id}`),
+  grants: () => call<{ grants: Grant[] }>("GET", "/api/oauth/grants").then((r) => r.grants),
+  revokeGrant: (id: string) => call("DELETE", `/api/oauth/grants/${id}`),
   styleGuide: () => call<StyleGuide>("GET", "/api/style-guide"),
   saveStyleGuide: (text: string) => call<StyleGuide>("PUT", "/api/style-guide", { text }),
 };

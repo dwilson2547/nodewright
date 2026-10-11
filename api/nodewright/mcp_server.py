@@ -1,9 +1,9 @@
 """The MCP server: what an agent sees (design §7).
 
 Streamable HTTP at /mcp, stateless, JSON responses. Every request carries a
-personal access token as `Authorization: Bearer nwp_...`; McpAuth rejects
-anything else before the SDK sees it, and each tool resolves the token again
-to find whose canvases it may touch.
+bearer token, either a personal access token or one issued through OAuth
+(oauth.py). McpAuth rejects anything else before the SDK sees it, and each
+tool resolves the token again to find whose canvases it may touch.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ from .models import Canvas, User, Workspace
 
 INSTRUCTIONS = """\
 nodewright is a diagram editor; its documents are JSON Canvas files ("canvases"),
-grouped as tabs in workspaces. You are acting for the signed-in user who made your token.
+grouped as tabs in workspaces. You are acting for the signed-in user who connected you.
 
 - Call get_style_guide before drawing anything: it says how this user likes diagrams.
 - Prefer omitting x/y/width/height: add_elements places and sizes nodes for you, next
@@ -43,13 +43,18 @@ grouped as tabs in workspaces. You are acting for the signed-in user who made yo
 """
 
 Direction = Literal["TB", "LR"]
+SCHEME = "Bearer"
+RESOURCE_METADATA_PATH = "/.well-known/oauth-protected-resource/mcp"
 
 
 class McpAuth:
-    """Bearer-token gate in front of the SDK's ASGI app."""
+    """Bearer-token gate in front of the SDK's ASGI app. A 401 points the
+    client at the protected-resource metadata (RFC 9728), which is how an
+    OAuth-capable client discovers it can sign the user in from a browser."""
 
     def __init__(self, inner: ASGIApp, db: Database, public_url: str):
         self.inner, self.db, self.public_url = inner, db, public_url.rstrip("/")
+        self.metadata_url = self.public_url + RESOURCE_METADATA_PATH
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] == "http":
@@ -57,13 +62,15 @@ class McpAuth:
             ok = False
             if raw:
                 with self.db.session() as s:
-                    ok = tokens.verify(s, raw) is not None
+                    ok = tokens.principal(s, raw) is not None
             if not ok:
+                challenge = (f'{SCHEME} error="invalid_token", '
+                             f'resource_metadata="{self.metadata_url}"')
                 res = JSONResponse(
                     {"error": "invalid_token",
-                     "error_description": "send Authorization: Bearer <token>; create a token "
-                                          f"in nodewright settings at {self.public_url}"},
-                    status_code=401, headers={"WWW-Authenticate": 'Bearer realm="nodewright"'})
+                     "error_description": "sign in through your MCP client, or send an access "
+                                          f"token created under Agents at {self.public_url}"},
+                    status_code=401, headers={"WWW-Authenticate": challenge})
                 await res(scope, receive, send)
                 return
         await self.inner(scope, receive, send)
@@ -76,11 +83,11 @@ def build(db: Database, settings: Settings) -> tuple[MCPServer, ASGIApp]:
     def run(ctx: Context, fn: Callable[[Session, User, leases.Holder], Any]) -> Any:
         raw = tokens.bearer((ctx.headers or {}).get("authorization"))
         with db.session() as s:
-            tok = tokens.verify(s, raw) if raw else None
-            if tok is None:
-                raise ToolError("not signed in: the access token is missing or revoked")
-            user = tok.user
-            who = leases.Holder("agent", user, tok.id, f"{user.username}'s agent ({tok.name})")
+            who_is = tokens.principal(s, raw)
+            if who_is is None:
+                raise ToolError("not signed in: the token is missing, expired or revoked")
+            user = who_is.user
+            who = leases.Holder("agent", user, who_is.client, who_is.label)
             try:
                 return fn(s, user, who)
             except access.Denied as exc:

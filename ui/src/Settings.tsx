@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, type NewToken, type Token } from "./api";
+import { api, type Grant, type NewToken, type Token } from "./api";
 
 function snippets(t: NewToken) {
   const header = `Authorization: Bearer ${t.token}`;
@@ -20,6 +20,58 @@ function Copy({ text }: { text: string }) {
       setDone(true);
       setTimeout(() => setDone(false), 1500);
     })}>{done ? "Copied" : "Copy"}</button>
+  );
+}
+
+const MCP_URL = `${window.location.origin}/mcp`;
+
+function Connect() {
+  const claude = `claude mcp add --transport http nodewright ${MCP_URL}`;
+  const json = JSON.stringify({ mcpServers: { nodewright: { type: "http", url: MCP_URL } } }, null, 2);
+  const [grants, setGrants] = useState<Grant[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
+  const load = () => api.grants().then(setGrants, fail);
+  useEffect(() => {
+    void load();
+  }, []);
+
+  const disconnect = async (g: Grant) => {
+    if (!confirm(`Disconnect "${g.client_name}"? It has to sign in again to use nodewright.`)) return;
+    await api.revokeGrant(g.id).catch(fail);
+    await load();
+  };
+
+  return (
+    <section>
+      <h3>Connect an agent</h3>
+      <p className="muted">
+        Add nodewright to your MCP client. The first time it connects, it opens a browser window
+        where you sign in and allow it. No token to copy.
+      </p>
+      <p className="muted">Claude Code:</p>
+      <div className="row"><pre className="grow">{claude}</pre><Copy text={claude} /></div>
+      <p className="muted">Clients that take an <code>mcpServers</code> block (VS Code, Copilot CLI, Cursor…):</p>
+      <div className="row"><pre className="grow">{json}</pre><Copy text={json} /></div>
+      {error && <p className="error">{error}</p>}
+      <h4>Connected apps</h4>
+      {grants && grants.length > 0 && (
+        <table className="tokens">
+          <thead><tr><th>App</th><th>Connected</th><th>Last used</th><th /></tr></thead>
+          <tbody>
+            {grants.map((g) => (
+              <tr key={g.id}>
+                <td>{g.client_name}</td>
+                <td>{new Date(g.created_at).toLocaleDateString()}</td>
+                <td>{g.last_used_at ? new Date(g.last_used_at).toLocaleString() : "never"}</td>
+                <td><button onClick={() => void disconnect(g)}>Disconnect</button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {grants && grants.length === 0 && <p className="muted">None yet.</p>}
+    </section>
   );
 }
 
@@ -58,8 +110,8 @@ function Tokens() {
     <section>
       <h3>Access tokens</h3>
       <p className="muted">
-        An agent connects to nodewright's MCP server with a token and edits your canvases as you.
-        Tokens only work for MCP, not for signing in here.
+        For clients that can't sign in through a browser (scripts, CI, older clients): the token
+        goes in an <code>Authorization</code> header. Tokens only work for MCP, not for signing in here.
       </p>
       {error && <p className="error">{error}</p>}
       <form className="row" onSubmit={(e) => { e.preventDefault(); void create(); }}>
@@ -159,8 +211,9 @@ export function AgentSettings({ onClose }: { onClose: () => void }) {
           <span className="grow" />
           <button onClick={onClose} aria-label="Close">×</button>
         </header>
-        <Tokens />
+        <Connect />
         <StyleGuideEditor />
+        <Tokens />
       </div>
     </div>
   );

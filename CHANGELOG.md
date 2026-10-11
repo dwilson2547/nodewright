@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.3.0 - 2026-10-11
+
+### Added
+- Browser sign-in for MCP clients (MCP authorization spec): nodewright is the OAuth
+  authorization server for `/mcp`, with protected-resource and authorization-server metadata,
+  dynamic client registration, PKCE, refresh-token rotation and revocation (the MCP SDK's
+  handlers; storage and consent in `oauth.py`). Login itself is still authentik.
+- Consent page at `/oauth/consent`, bound to the signed-in user with a one-time nonce; shows where
+  the user will be sent back to. Its CSP allows the form redirect to that origin only.
+- Agents dialog: "Connect an agent" with token-free setup, and "Connected apps" with Disconnect.
+- `/api/auth/oidc/login?next=` returns to the consent page after sign-in (only that path).
+
+### Changed
+- `/mcp` 401s carry `WWW-Authenticate: Bearer resource_metadata=…` so clients can discover sign-in.
+- Personal access tokens remain for clients without browser sign-in.
+
 ## 0.2.0 - 2026-10-11
 
 ### Added

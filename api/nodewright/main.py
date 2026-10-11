@@ -8,20 +8,25 @@ import json
 import logging
 import os
 import re
+from urllib.parse import quote, urlsplit
 from datetime import datetime
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse, RedirectResponse,
+                               StreamingResponse)
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
+from mcp.server.auth.routes import create_auth_routes, create_protected_resource_routes
+from mcp.server.auth.settings import ClientRegistrationOptions, RevocationOptions
+from pydantic import AnyHttpUrl
 from starlette.routing import Route
 
-from . import (__version__, access, auth, canvas_format, events, leases, mcp_server, oidc,
-               styleguide, tokens)
+from . import (__version__, access, auth, canvas_format, events, leases, mcp_server, oauth,
+               oidc, styleguide, tokens)
 from .config import Settings
 from .db import Database
-from .models import AccessToken, Canvas, CanvasRevision, StyleGuide, User, Workspace, utcnow
+from .models import AccessToken, Canvas, OAuthGrant, CanvasRevision, StyleGuide, User, Workspace, utcnow
 
 log = logging.getLogger("nodewright")
 
@@ -31,6 +36,7 @@ CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';
 REVISION_LIST_LIMIT = 100
 CLIENT_HEADER = "x-nodewright-client"
 SSE_PING_S = 20.0
+NEXT_COOKIE = "nw_next"
 
 
 class NameIn(BaseModel):
@@ -169,8 +175,12 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
         auth.end_session(s, request, settings, response)
         return {"ok": True}
 
+    def safe_next(value: str) -> str:
+        # Only the OAuth consent page needs a way back after sign-in.
+        return value if value.startswith(oauth.CONSENT_PATH + "?") and len(value) < 300 else ""
+
     @app.get(oidc.FLOW_PATH + "/login")
-    def oidc_login():
+    def oidc_login(next: str = ""):
         if provider is None:
             raise HTTPException(404, "sign-in is not set up on this server")
         try:
@@ -181,6 +191,9 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
         res = RedirectResponse(url, status_code=302)
         res.set_cookie(oidc.FLOW_COOKIE, flow, max_age=oidc.FLOW_TTL_S, path=oidc.FLOW_PATH,
                        httponly=True, secure=settings.secure, samesite="lax")
+        if safe_next(next):
+            res.set_cookie(NEXT_COOKIE, next, max_age=oidc.FLOW_TTL_S, path=oidc.FLOW_PATH,
+                           httponly=True, secure=settings.secure, samesite="lax")
         return res
 
     @app.get(oidc.FLOW_PATH + "/callback")
@@ -188,8 +201,10 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
                       s: Session = Depends(session)):
         if provider is None:
             raise HTTPException(404, "sign-in is not set up on this server")
-        res = RedirectResponse("/", status_code=302)
+        res = RedirectResponse(safe_next(request.cookies.get(NEXT_COOKIE, "")) or "/",
+                               status_code=302)
         res.delete_cookie(oidc.FLOW_COOKIE, path=oidc.FLOW_PATH)
+        res.delete_cookie(NEXT_COOKIE, path=oidc.FLOW_PATH)
         if error:
             return RedirectResponse("/?signin_error=" + re.sub(r"[^a-z_]", "", error)[:40], 302)
         try:
@@ -442,6 +457,85 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
         else:
             row.text, row.updated_at = body.text, utcnow()
         return {"text": body.text, "is_default": False}
+
+    # --- OAuth for MCP clients (oauth.py) ------------------------------------
+
+    @app.get("/api/oauth/grants")
+    def list_grants(user: User = Depends(user_dep), s: Session = Depends(session)):
+        rows = s.scalars(select(OAuthGrant).where(OAuthGrant.user_id == user.id)
+                         .order_by(OAuthGrant.created_at.desc()))
+        return {"grants": [oauth.grant_out(g) for g in rows]}
+
+    @app.delete("/api/oauth/grants/{grant_id}", status_code=204)
+    def revoke_grant(grant_id: str, user: User = Depends(user_dep),
+                     s: Session = Depends(session)):
+        g = s.get(OAuthGrant, grant_id)
+        if g is None or g.user_id != user.id:
+            raise HTTPException(404, "not found")
+        s.delete(g)
+
+    def consent_page(body: str, status: int = 200, redirect_to: str | None = None) -> HTMLResponse:
+        csp = CSP
+        if redirect_to:
+            csp = CSP.replace("form-action 'self'",
+                              f"form-action 'self' {oauth.form_action_source(redirect_to)}")
+        return HTMLResponse(body, status_code=status, headers={
+            "Content-Security-Policy": csp, "Cache-Control": "no-store",
+            "X-Frame-Options": "DENY"})
+
+    @app.get(oauth.CONSENT_PATH)
+    def consent(request: Request, req: str = "", s: Session = Depends(session)):
+        try:
+            row, info = oauth.pending(s, req)
+        except oauth.ConsentError as exc:
+            return consent_page(oauth.error_html(str(exc)), 400)
+        user = auth.user_for_request(s, request, settings)
+        if user is None:
+            if provider is None:
+                return consent_page(oauth.error_html(
+                    "Sign in to nodewright in this browser first, then reload this page."), 401)
+            back = f"{oauth.CONSENT_PATH}?req={req}"
+            return RedirectResponse(f"{oidc.FLOW_PATH}/login?next={quote(back, safe='')}", 302)
+        try:
+            nonce = oauth.show(s, row, user)
+        except oauth.ConsentError as exc:
+            return consent_page(oauth.error_html(str(exc)), 403)
+        return consent_page(oauth.consent_html(info, row.params, user, req, nonce),
+                            redirect_to=row.params["redirect_uri"])
+
+    @app.post(oauth.CONSENT_PATH)
+    async def consent_decide(request: Request):
+        form = await request.form()
+        req, nonce = str(form.get("req") or ""), str(form.get("nonce") or "")
+        approve = form.get("decision") == "allow"
+        with db.session() as s:
+            user = auth.user_for_request(s, request, settings)
+            try:
+                row, _ = oauth.pending(s, req)
+                if user is None:
+                    raise oauth.ConsentError("You are no longer signed in. Start again.")
+                url = oauth.decide(s, row, user, nonce, approve)
+            except oauth.ConsentError as exc:
+                return consent_page(oauth.error_html(str(exc)), 400)
+        return RedirectResponse(url, status_code=303)
+
+    # RFC 8414 wants an https issuer; plain http is only allowed on loopback.
+    if settings.secure or urlsplit(settings.public_url).hostname in ("localhost", "127.0.0.1"):
+        issuer = AnyHttpUrl(settings.public_url)
+        app.router.routes.extend(create_auth_routes(
+            oauth.Provider(db, settings.public_url), issuer_url=issuer,
+            client_registration_options=ClientRegistrationOptions(
+                enabled=True, valid_scopes=[oauth.SCOPE], default_scopes=[oauth.SCOPE]),
+            revocation_options=RevocationOptions(enabled=True)))
+        resource_routes = create_protected_resource_routes(
+            resource_url=AnyHttpUrl(settings.public_url + "/mcp"), authorization_servers=[issuer],
+            scopes_supported=[oauth.SCOPE], resource_name="nodewright")
+        app.router.routes.extend(resource_routes)
+        # Some clients look for the metadata without the resource path.
+        app.router.routes.append(Route("/.well-known/oauth-protected-resource",
+                                       endpoint=resource_routes[0].endpoint, methods=["GET", "OPTIONS"]))
+    else:
+        log.warning("MCP OAuth disabled: PUBLIC_URL is neither https nor localhost")
 
     # MCP endpoint (bearer tokens, not cookies); must come before the catch-alls.
     app.router.routes.append(Route("/mcp", endpoint=mcp_app, methods=["GET", "POST", "DELETE"]))

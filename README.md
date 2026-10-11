@@ -16,22 +16,24 @@ overwriting each other. Design and roadmap: [`docs/design.md`](docs/design.md).
 
 ## Connect an agent
 
-1. Sign in, open **Agents**, create a token. It is shown once, with ready-to-paste config.
-2. Claude Code:
-   `claude mcp add --transport http nodewright https://nodewright.danwils.com/mcp --header "Authorization: Bearer nwp_…"`
-3. Copilot CLI (`~/.copilot/mcp-config.json`) and other `mcpServers`-style clients:
-   `{"mcpServers": {"nodewright": {"type": "http", "url": "https://nodewright.danwils.com/mcp",
-   "headers": {"Authorization": "Bearer nwp_…"}}}}`
-4. Ask it to "draw X in nodewright". The **Agents** dialog also holds the style guide agents read
-   before drawing.
+1. Add the server to your MCP client; no token needed:
+   - Claude Code: `claude mcp add --transport http nodewright https://nodewright.danwils.com/mcp`
+   - `mcpServers`-style clients (VS Code, Copilot CLI, Cursor):
+     `{"mcpServers": {"nodewright": {"type": "http", "url": "https://nodewright.danwils.com/mcp"}}}`
+2. On first use the client opens a browser: sign in (authentik) and **Allow** it. It then holds a
+   1-hour access token that it refreshes itself; disconnect it under **Agents → Connected apps**.
+3. Ask it to "draw X in nodewright". **Agents** also holds the style guide agents read first.
 
-Tokens only work at `/mcp`; revoke them from the same dialog.
+Clients that can't do the browser sign-in can use a personal access token instead: **Agents →
+Access tokens**, sent as `Authorization: Bearer nwp_…` (`--header` for Claude Code, `headers` in
+`mcpServers`). Tokens of either kind only work at `/mcp`.
 
 ## Layout
 
 - `api/` — FastAPI (`nodewright/`), SQLAlchemy on Postgres (SQLite locally), authentik OIDC login.
   `access.py` permissions, `leases.py` edit locks, `events.py` SSE fan-out, `ops.py` + `layout.py`
-  the agent edit operations, `mcp_server.py` the MCP tools.
+  the agent edit operations, `mcp_server.py` the MCP tools,
+  `oauth.py` OAuth sign-in for MCP clients.
 - `ui/` — Vite + React + React Flow (`@xyflow/react`). Built into the image and served by the API.
 - `helm/nodewright/` — chart, deployed by Argo from `infra/cluster-config/argocd/nodewright.yaml`.
 
