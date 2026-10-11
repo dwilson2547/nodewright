@@ -3,6 +3,7 @@ import { ReactFlowProvider } from "@xyflow/react";
 import { api, ApiError, type CanvasMeta, type Config, type Folder, type Me, type Workspace } from "./api";
 import { Editor, type EditorHandle, type SaveStatus } from "./Editor";
 import { AgentSettings } from "./Settings";
+import { ShareDialog } from "./ShareDialog";
 import { Sidebar } from "./Sidebar";
 import { TabLinksContext } from "./tablinks";
 
@@ -98,6 +99,7 @@ export default function App() {
   const [status, setStatus] = useState<SaveStatus>("loading");
   const [error, setError] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const [focus, setFocus] = useState<{ canvas: string; node: string } | null>(null);
   const linked = useRef<string | null>(linkedCanvas());
   const editor = useRef<EditorHandle>(null);
@@ -311,6 +313,7 @@ export default function App() {
           e.target.value = "";
           if (f) void importFile(f);
         }} />
+        <button onClick={() => setShareOpen(true)} disabled={!tabId} title="Read-only links anyone can open">Share</button>
         <button onClick={() => setSettingsOpen(true)} title="Access tokens and style guide for AI agents (MCP)">Agents</button>
         <span className="muted">{me.username}</span>
         <button onClick={signOut}>Sign out</button>
@@ -354,6 +357,10 @@ export default function App() {
       </div>
       </div>
       {settingsOpen && <AgentSettings onClose={() => setSettingsOpen(false)} />}
+      {shareOpen && tabId && (
+        <ShareDialog canvasId={tabId} canvasName={tabs.find((t) => t.id === tabId)?.name ?? ""}
+          onClose={() => setShareOpen(false)} />
+      )}
     </div>
   );
 }

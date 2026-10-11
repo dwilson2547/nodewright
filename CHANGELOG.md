@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.7.0 - 2026-10-11
+
+### Added
+- Read-only share links: **Share** in the header makes a link to the open tab that anyone can view
+  at `/s/<token>` without signing in, optionally with the workspace's other tabs so tab links work.
+  Links always show the latest version and can be revoked; only a workspace's owner manages them.
+- Folders: a collapsible sidebar replaces the workspace picker. Folders nest, are personal to each
+  user, and take workspaces or other folders by drag and drop. Deleting a folder never deletes a
+  workspace. MCP: `list_workspaces` returns folders; new `create_folder` and `file_workspace`;
+  `create_workspace` takes `folder_id`.
+- Attachments nothing uses any more are deleted after `attachments.keepDays` (30): not on any
+  current canvas, template, or revision from that window.
+- CI (GitHub Actions): tests, lint and build on every push; on `main` the image is pushed to Docker
+  Hub, including `:<version>` the first time a version appears.
+
+### Changed
+- Schema changes are Alembic migrations, run at startup. An existing database is stamped at the
+  0.6.0 baseline first, then upgraded.
+
+### Fixed
+- Edges keep clear of group titles, and labels move along their edge to avoid sitting on a node or
+  a group's border.
+
 ## 0.6.0 - 2026-10-11
 
 ### Added

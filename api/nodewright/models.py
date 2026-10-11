@@ -12,7 +12,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -286,7 +286,7 @@ class Attachment(Base):
 
 
 class Folder(Base):
-    """A user's folder for organising workspaces (design §3.4). Folders are
+    """A user's folder for organising workspaces (design §11.2). Folders are
     personal: they nest (parent_id) and hold workspaces through
     workspace_folders, so a shared workspace can sit in a different folder for
     each person who sees it. Deleting a folder deletes its subfolders and puts
@@ -311,3 +311,21 @@ class WorkspaceFolder(Base):
         ForeignKey("workspaces.id", ondelete="CASCADE"), primary_key=True)
     folder_id: Mapped[str] = mapped_column(
         ForeignKey("folders.id", ondelete="CASCADE"), index=True)
+
+
+class ShareLink(Base):
+    """A read-only, public link to one canvas (design §9): anyone holding the
+    token can view it at /s/<token> without signing in. `all_tabs` also lets
+    the viewer open the workspace's other tabs, so tab links keep working.
+    The token is stored as is so its owner can copy the link again; it guards
+    nothing that isn't in this same database. Revoking deletes the row."""
+    __tablename__ = "share_links"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    token: Mapped[str] = mapped_column(String(64), unique=True)
+    canvas_id: Mapped[str] = mapped_column(
+        ForeignKey("canvases.id", ondelete="CASCADE"), index=True)
+    all_tabs: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_by: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

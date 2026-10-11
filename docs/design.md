@@ -213,7 +213,8 @@ of editor polish.
 3. ✅ (0.4.0) **Editor:** shapes and edge line styles (§3.2), templates and default pages (§4),
    tab links and attachments (§3.3). Folders (§11.2) followed in 0.7.0 with Alembic (✅ user
    approved the migration).
-4. **Sharing:** read-only share links, workspace members, organisations with built-in roles (§11.1).
+4. **Sharing:** ✅ (0.7.0) read-only share links (§9) and folders (§11.2); next workspace members,
+   then organisations with built-in roles (§11.1).
 5. **Stretch:** marketplace (§11.5), custom roles, workspace zip import/export.
 
 Full MCP OAuth (§6.2) was pulled forward and shipped as 0.3.0 (✅ user asked for browser sign-in).
@@ -231,16 +232,21 @@ Resolved 2026-10-10 (✅ user):
   extensions and cross-canvas links work), behind an unguessable, revocable token. Not via
   `meta/canvas-viewer`: its CSP (`connect-src 'self'`) only loads files from its own origin and it
   does not understand the §3.2 extensions. canvas-viewer stays the simple tool for loose `.canvas`
-  files. Not built yet.
+  files. Built in 0.7.0 (`api/nodewright/shares.py`, `ui/src/Share.tsx`): a link is to one tab, or
+  with `all_tabs` to every tab of its workspace so tab links work; only owners (`workspace.manage`)
+  create, list or revoke links; revoking deletes the row. Tokens are stored as is so the link can be
+  copied again (they guard nothing outside the same database). Attachments are served by token too,
+  and a single-tab link only serves files that tab shows. No agent tool creates links: making
+  something public stays a deliberate human act.
 
 ## 10. Status
 
 Phase 1 ✅ deployed 2026-10-11 as 0.1.0; phase 2 ✅ as 0.2.0, MCP OAuth sign-in as 0.3.0, editor
 phase as 0.4.0 (see `CHANGELOG.md`): MCP server, access tokens, auto-layout, edit leases, SSE live
 updates, style guides, shapes and line styles, templates, tab links, attachments, and
-`authorize()` with a members table (no sharing UI). Not yet: folders, share links, zip
-export, Alembic (schema is `create_all` at startup, which only adds tables; the first change to an
-existing table needs migrations set up). Live updates are in-process, so the chart must stay at
+`authorize()` with a members table (no sharing UI). 0.7.0 added folders, read-only share links,
+Alembic migrations, CI and the unused-attachment sweep. Not yet: workspace members UI,
+organisations, zip export. Live updates are in-process, so the chart must stay at
 one replica until `events.py` moves to Postgres LISTEN/NOTIFY.
 
 ## 11. Future: collaboration and community 📐

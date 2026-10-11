@@ -1,4 +1,4 @@
-// Workspaces, organised in the user's folders (design §3.4). Drag a workspace
+// Workspaces, organised in the user's folders (design §11.2). Drag a workspace
 // or folder onto a folder to file it there, or onto empty space for the top level.
 import { useEffect, useState, type DragEvent } from "react";
 import type { Folder, Workspace } from "./api";

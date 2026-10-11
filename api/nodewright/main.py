@@ -23,11 +23,11 @@ from pydantic import AnyHttpUrl, BaseModel, ConfigDict
 from starlette.routing import Route
 
 from . import (__version__, access, attachments, auth, canvas_format, events, folders, leases,
-               mcp_server, oauth, oidc, render, storage, styleguide, templates, tokens)
+               mcp_server, oauth, oidc, render, shares, storage, styleguide, templates, tokens)
 from .config import Settings
 from .db import Database
-from .models import (AccessToken, Attachment, Canvas, CanvasRevision, OAuthGrant, StyleGuide, Template, User,
-                     Workspace, utcnow)
+from .models import (AccessToken, Attachment, Canvas, CanvasRevision, OAuthGrant, ShareLink, StyleGuide,
+                     Template, User, Workspace, utcnow)
 
 log = logging.getLogger("nodewright")
 
@@ -57,6 +57,10 @@ class FolderPatch(BaseModel):
 
 class FileIn(BaseModel):
     folder_id: str | None = None
+
+
+class ShareIn(BaseModel):
+    all_tabs: bool = False
 
 
 class CanvasCreate(BaseModel):
@@ -714,6 +718,66 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
         ticket = ticket_for(canvas_id, t)
         a = s.get(Attachment, att_id)
         if a is None or a.workspace_id != ticket.workspace_id:
+            raise HTTPException(404, "no such attachment")
+        return serve_attachment(a)
+
+    # --- share links (shares.py): public and read-only, by token ---------------
+
+    @app.get("/api/canvases/{canvas_id}/shares")
+    def list_shares(canvas_id: str, user: User = Depends(user_dep), s: Session = Depends(session)):
+        canvas_for(s, user, canvas_id, access.MANAGE)
+        return {"shares": [shares.out(x, settings.public_url)
+                           for x in shares.for_canvas(s, canvas_id)]}
+
+    @app.post("/api/canvases/{canvas_id}/shares", status_code=201)
+    def create_share(canvas_id: str, body: ShareIn, user: User = Depends(user_dep),
+                     s: Session = Depends(session)):
+        c = canvas_for(s, user, canvas_id, access.MANAGE)
+        try:
+            link = shares.create(s, c, user.id, body.all_tabs)
+        except shares.ShareError as exc:
+            raise HTTPException(exc.status, str(exc)) from None
+        s.commit()
+        return shares.out(link, settings.public_url)
+
+    @app.delete("/api/shares/{share_id}", status_code=204)
+    def revoke_share(share_id: str, user: User = Depends(user_dep), s: Session = Depends(session)):
+        link = s.get(ShareLink, share_id)
+        if link is None:
+            raise HTTPException(404, "no such share link")
+        canvas_for(s, user, link.canvas_id, access.MANAGE)
+        s.delete(link)
+        s.commit()
+
+    def share_payload(s: Session, token: str, canvas_id: str | None) -> dict:
+        try:
+            if canvas_id is None:
+                canvas_id = shares.resolve(s, token)[1].id
+            _, c, tabs = shares.visible(s, token, canvas_id)
+        except shares.ShareError as exc:
+            raise HTTPException(exc.status, str(exc)) from None
+        ws = s.get(Workspace, c.workspace_id)
+        return {"id": c.id, "name": c.name, "data": c.data, "revision": c.revision,
+                "workspace": ws.name if ws else "", "tabs": [_canvas_meta(x) for x in tabs]}
+
+    @app.get("/api/s/{token}")
+    def open_share(token: str, s: Session = Depends(session)):
+        return share_payload(s, token, None)
+
+    @app.get("/api/s/{token}/canvases/{canvas_id}")
+    def open_shared_tab(token: str, canvas_id: str, s: Session = Depends(session)):
+        return share_payload(s, token, canvas_id)
+
+    @app.get("/api/s/{token}/attachments/{att_id}")
+    def share_attachment(token: str, att_id: str, s: Session = Depends(session)):
+        try:
+            link, c = shares.resolve(s, token)
+        except shares.ShareError as exc:
+            raise HTTPException(exc.status, str(exc)) from None
+        a = s.get(Attachment, att_id)
+        # Without all_tabs, only files the shared canvas itself shows.
+        if (a is None or a.workspace_id != c.workspace_id
+                or (not link.all_tabs and f"attachments/{att_id}" not in json.dumps(c.data))):
             raise HTTPException(404, "no such attachment")
         return serve_attachment(a)
 

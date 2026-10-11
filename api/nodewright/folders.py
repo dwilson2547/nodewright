@@ -1,4 +1,4 @@
-"""Folders: a user's own tree for organising workspaces (design §3.4).
+"""Folders: a user's own tree for organising workspaces (design §11.2).
 
 Folders belong to one user and only that user sees them. A workspace is
 filed per user (workspace_folders), so when workspaces are shared each person

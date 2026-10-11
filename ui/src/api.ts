@@ -44,6 +44,7 @@ export type Attachment = {
 };
 export type Workspace = { id: string; name: string; updated_at: string; folder_id?: string | null };
 export type Folder = { id: string; name: string; parent_id: string | null };
+export type ShareLink = { id: string; canvas_id: string; all_tabs: boolean; url: string; created_at: string };
 export type CanvasMeta = {
   id: string;
   workspace_id: string;
@@ -91,6 +92,11 @@ export const api = {
   patchFolder: (id: string, patch: { name?: string; parent_id?: string | null }) =>
     call<Folder>("PATCH", `/api/folders/${id}`, patch),
   deleteFolder: (id: string) => call("DELETE", `/api/folders/${id}`),
+  shares: (canvasId: string) =>
+    call<{ shares: ShareLink[] }>("GET", `/api/canvases/${canvasId}/shares`).then((r) => r.shares),
+  createShare: (canvasId: string, all_tabs: boolean) =>
+    call<ShareLink>("POST", `/api/canvases/${canvasId}/shares`, { all_tabs }),
+  revokeShare: (id: string) => call("DELETE", `/api/shares/${id}`),
   canvases: (wsId: string) => call<CanvasMeta[]>("GET", `/api/workspaces/${wsId}/canvases`),
   createCanvas: (wsId: string, name: string, data?: JsonCanvas, template?: string) =>
     call<CanvasMeta>("POST", `/api/workspaces/${wsId}/canvases`, { name, data, template }),
