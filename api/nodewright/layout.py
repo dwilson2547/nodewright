@@ -1,6 +1,8 @@
 """Automatic placement, so an agent never has to invent coordinates (design §7).
 
 A layered ("Sugiyama") layout: break cycles, assign layers by longest path,
+give each edge that skips layers a placeholder in every layer it crosses (so
+the layers it passes leave a lane open for it instead of a node in its way),
 order each layer by barycentre sweeps, then place nodes along each layer as
 close to their neighbours as the spacing allows. Groups are laid out
 recursively: a group's children form their own block, and the group is sized
@@ -18,6 +20,7 @@ NODE_GAP = 40
 RANK_GAP = 80
 GROUP_PAD = 40
 SWEEPS = 4
+LANE = 40  # cross-axis room reserved for an edge passing through a layer
 
 
 def snap(v: float) -> int:
@@ -108,6 +111,21 @@ def layered(ids: list[str], sizes: dict[str, tuple[int, int]], edges: list[tuple
     idset = set(ids)
     pairs = list(dict.fromkeys((a, b) for a, b in edges if a in idset and b in idset and a != b))
     layer = _layers(ids, pairs)
+    real = ids
+    ids, sizes = list(ids), dict(sizes)
+    chained: list[tuple[str, str]] = []
+    for k, (a, b) in enumerate(pairs):
+        lo, hi = (a, b) if layer[a] <= layer[b] else (b, a)
+        prev = lo
+        for li in range(layer[lo] + 1, layer[hi]):
+            d = f"\0lane{k}:{li}"
+            ids.append(d)
+            layer[d] = li
+            sizes[d] = (LANE, 0) if tb else (0, LANE)
+            chained.append((prev, d))
+            prev = d
+        chained.append((prev, hi))
+    pairs = chained
     nbrs_up: dict[str, list[str]] = defaultdict(list)
     nbrs_down: dict[str, list[str]] = defaultdict(list)
     for a, b in pairs:
@@ -169,15 +187,15 @@ def layered(ids: list[str], sizes: dict[str, tuple[int, int]], edges: list[tuple
     band = {li: max(main[n] for n in rows[li]) for li in range(depth)}
 
     raw: dict[str, tuple[float, float]] = {}
-    for n in ids:
+    for n in real:
         c = centre[n] - cross[n] / 2
         m = band_start[layer[n]] + (band[layer[n]] - main[n]) / 2
         raw[n] = (c, m) if tb else (m, c)
     minx = min(x for x, _ in raw.values())
     miny = min(y for _, y in raw.values())
     out = {n: (snap(x - minx), snap(y - miny)) for n, (x, y) in raw.items()}
-    w = max(out[n][0] + sizes[n][0] for n in ids)
-    h = max(out[n][1] + sizes[n][1] for n in ids)
+    w = max(out[n][0] + sizes[n][0] for n in real)
+    h = max(out[n][1] + sizes[n][1] for n in real)
     return out, (w, h)
 
 

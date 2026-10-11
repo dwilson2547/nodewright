@@ -37,12 +37,15 @@ import {
   type CNode,
 } from "./canvasMapping";
 import { nodeTypes, ReadOnly } from "./nodes";
+import { RoutedEdge } from "./edges";
 import { Markers } from "./markers";
 import { canvasFile, TabLinksContext } from "./tablinks";
 import {
   EDGE_ARROWS, EDGE_PATHS, EDGE_ROUTES, LINE_WIDTHS, NODE_BORDERS, NODE_SHAPES, TEXT_ALIGN,
   attr, withAttr, type Option,
 } from "./styles";
+
+const edgeTypes = { routed: RoutedEdge };
 
 function Pick({ title, options, value, onChange }: {
   title: string; options: Option[]; value: string; onChange: (v: string) => void;
@@ -750,6 +753,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}

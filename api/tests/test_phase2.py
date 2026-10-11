@@ -244,6 +244,32 @@ def test_add_elements_anchors_new_block_below_what_it_connects_to():
     assert b["y"] >= 1060 + 60 and abs((b["x"] + b["width"] / 2) - 1100) <= 20
 
 
+def test_layout_leaves_a_lane_for_edges_that_skip_a_layer():
+    sizes = {k: (160, 60) for k in "abc"}
+    pos, (w, _) = layout.layered(list("abc"), sizes, [("a", "b"), ("b", "c"), ("a", "c")])
+    # b's layer keeps an empty column at least LANE wide beside b, inside the block.
+    bx = pos["b"][0]
+    free = max(bx, w - (bx + 160))
+    assert free >= layout.LANE + layout.NODE_GAP
+    assert set(pos) == set("abc")
+
+
+def test_placing_ops_return_boxes_and_overlaps():
+    data = {"nodes": [{"id": "a", "type": "text", "text": "A", "x": 0, "y": 0,
+                       "width": 200, "height": 60}], "edges": []}
+    out = ops.add_elements([{"id": "b", "text": "B", "x": 100, "y": 20, "width": 100,
+                             "height": 40}, {"id": "c", "text": "C"}], [])(data)
+    boxes = {b["id"]: b for b in out["nodes"]}
+    assert boxes["b"] == {"id": "b", "x": 100, "y": 20, "width": 100, "height": 40}
+    assert set(boxes["c"]) == {"id", "x", "y", "width", "height"}
+    assert out["overlaps"] == [["a", "b"]]
+    out = ops.relayout(None)(data)
+    assert len(out["nodes"]) == 3 and out["overlaps"] == []
+    g = ops.add_elements([{"id": "g", "type": "group", "label": "G"},
+                          {"id": "d", "text": "D", "group": "g"}], [])(data)
+    assert g["overlaps"] == []
+
+
 def test_update_and_delete_elements():
     data = {"nodes": [{"id": "a", "type": "text", "text": "A", "x": 0, "y": 0, "width": 200,
                        "height": 60, "color": "1"},

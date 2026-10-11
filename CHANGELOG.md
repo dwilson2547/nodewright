@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.5.0 - 2026-10-11
+
+From agent feedback after testing the MCP against prod.
+
+### Added
+- Edges route around nodes. `a-star` and `square` edges take right-angle paths that keep clear of
+  every other node (rounded and sharp corners); default curved edges switch to a rounded detour
+  only when the curve would cross a node; `direct` stays straight. Labels sit on the path's
+  midpoint on a solid background.
+- `add_elements`, `layout` and `apply_template` return each placed node's box
+  (`nodes: [{id, x, y, width, height}]`) and `overlaps`, so an agent can check its work without
+  calling `get_canvas`.
+
+### Changed
+- Auto-layout reserves a lane in every layer an edge skips, so a node no longer sits in the path of
+  an edge between its neighbours.
+
 ## 0.4.1 - 2026-10-11
 
 ### Fixed

@@ -49,7 +49,7 @@ plugin) preserves unknown keys when it re-saves a canvas.
 | Node | `textAlign` | center, right |
 | Edge | `path` | dotted, short-dashed, long-dashed |
 | Edge | `arrow` | triangle-outline, thin-triangle, halved-triangle, diamond, diamond-outline, circle, circle-outline, blunt |
-| Edge | `pathfindingMethod` | direct (straight), square (right-angle), a-star (rendered as right-angle) |
+| Edge | `pathfindingMethod` | direct (straight, never rerouted), square (sharp right angles around nodes), a-star (rounded right angles around nodes); absent = curved, switching to a rounded detour when the curve would cross a node (0.5.0) |
 | Edge | `lineWidth` | 1, 2, 3, 4, 6, 8 — nodewright's own; the plugin has none |
 
 Loading only checks `styleAttributes` is an object of strings, so newer plugin values still load;
@@ -174,8 +174,18 @@ Still planned: `apply_template` (§4), `link_canvases` (§3.3).
 Layout is our own (`api/nodewright/layout.py`), not ELK/dagre: a layered layout (cycle breaking,
 longest-path layers, barycentre ordering, least-squares packing) with groups as compound nodes,
 snapped to a 20 px grid. Unpositioned new nodes are laid out as one block and anchored below/right
-of the existing nodes they connect to. Known limit: edges are not routed, so an edge can cross a
-node that sits between its ends.
+of the existing nodes they connect to. An edge that skips layers gets a placeholder in each layer
+it crosses, so those layers leave a lane open for it (0.5.0).
+
+Edges are routed where they are drawn, since JSON Canvas edges have no waypoints: `ui/src/routing.ts`
+is an orthogonal A* over a sparse grid of lines 20 px outside every node, with a bend penalty
+(0.5.0). The server does not route; placing ops instead return each placed node's box and any
+`overlaps` (pairs of colliding node ids) so an agent can check its work without `get_canvas`.
+
+Agent feedback 2026-10-11 (from a web Claude session using the MCP): wanted a `render_canvas` tool
+returning an image so an agent can see its result. Not built: the choice between rendering the
+real editor in headless Chromium (exact, shares routing, needs a browser container) and a separate
+server-side SVG renderer (light, but a second renderer to keep in step) is waiting on the user.
 
 Key rule: nodes added without coordinates are placed by the layout engine. Every tool call is one
 revision, so a bad agent edit is one undo away.

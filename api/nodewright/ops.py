@@ -105,6 +105,32 @@ def _bbox(nodes: list[dict]) -> tuple[int, int, int, int] | None:
             max(n["x"] + n["width"] for n in nodes), max(n["y"] + n["height"] for n in nodes))
 
 
+def geometry(data: dict, ids: list[str]) -> dict:
+    """Where `ids` ended up, and any node they now overlap (groups count only
+    when partly overlapped, since sitting inside one is intended). Returned by
+    placing ops so an agent can check its work without re-reading the canvas."""
+    by_id = {n["id"]: n for n in data["nodes"]}
+    boxes = [{k: by_id[i][k] for k in ("id", "x", "y", "width", "height")}
+             for i in ids if i in by_id and "x" in by_id[i]]
+    overlaps, seen = [], set()
+    for b in boxes:
+        a = by_id[b["id"]]
+        ax0, ay0, ax1, ay1 = _box(a)
+        for n in data["nodes"]:
+            if n["id"] == a["id"] or "x" not in n:
+                continue
+            pair = tuple(sorted((a["id"], n["id"])))
+            if pair in seen:
+                continue
+            bx0, by0, bx1, by1 = _box(n)
+            if ax0 < bx1 and bx0 < ax1 and ay0 < by1 and by0 < ay1:
+                if "group" in (a.get("type"), n.get("type")) and (_inside(a, n) or _inside(n, a)):
+                    continue
+                seen.add(pair)
+                overlaps.append(list(pair))
+    return {"nodes": boxes, "overlaps": overlaps}
+
+
 def _shift(nodes: list[dict], dx: int, dy: int) -> None:
     for n in nodes:
         n["x"] += dx
@@ -289,7 +315,8 @@ def add_elements(nodes: list[dict], edges: list[dict], direction: str = "TB"):
         others = [n for n in new if n["type"] != "group"]
         data["nodes"] = new_groups + existing + others
         data["edges"] = data["edges"] + new_edges
-        return {"node_ids": [n["id"] for n in new], "edge_ids": [e["id"] for e in new_edges]}
+        return {"node_ids": [n["id"] for n in new], "edge_ids": [e["id"] for e in new_edges],
+                **geometry(data, [n["id"] for n in new])}
 
     return op
 
@@ -424,7 +451,7 @@ def relayout(node_ids: list[str] | None, direction: str = "TB"):
         for i, (x, y, w, h) in boxes.items():
             n = by_id[i]
             n["x"], n["y"], n["width"], n["height"] = ox + x, oy + y, w, h
-        return {"laid_out": len(boxes)}
+        return {"laid_out": len(boxes), **geometry(data, list(boxes))}
 
     return op
 
@@ -448,7 +475,8 @@ def insert(fragment: dict, x: int | None = None, y: int | None = None):
         data["nodes"] = groups + data["nodes"] + others
         data["edges"] = data["edges"] + doc["edges"]
         return {"node_ids": [n["id"] for n in doc["nodes"]],
-                "edge_ids": [e["id"] for e in doc["edges"]], "at": [ox, oy]}
+                "edge_ids": [e["id"] for e in doc["edges"]], "at": [ox, oy],
+                **geometry(data, [n["id"] for n in doc["nodes"]])}
 
     return op
 

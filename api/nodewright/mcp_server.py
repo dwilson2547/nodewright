@@ -59,8 +59,10 @@ NODE_STYLE = ("styleAttributes (optional object; omit a key for the default): "
               + styles.describe(styles.NODE) + ". shape and textAlign apply to text nodes.")
 EDGE_STYLE = ("styleAttributes (optional object; omit a key for the default, a solid curved "
               "2px line with a filled triangle): " + styles.describe(styles.EDGE)
-              + ". path is the dash pattern, pathfindingMethod the routing (direct = straight, "
-              "square/a-star = right angles), arrow the arrowhead shape on whichever ends have one.")
+              + ". path is the dash pattern, pathfindingMethod the routing (default curves, "
+              "switching to a rounded detour if the curve would cross a node; direct = straight, "
+              "always; square = sharp right angles around nodes; a-star = rounded right angles "
+              "around nodes), arrow the arrowhead shape on whichever ends have one.")
 
 Direction = Literal["TB", "LR"]
 SCHEME = "Bearer"
@@ -204,7 +206,9 @@ def build(db: Database, settings: Settings,
                      direction: Direction = "TB") -> dict:
         """Add nodes and edges. Unpositioned nodes are laid out as a block in
         `direction`, beside the existing nodes they connect to (or beside the
-        drawing if they connect to nothing). Returns the new ids."""
+        drawing if they connect to nothing). Returns the new ids, each new
+        node's box (x, y, width, height) and `overlaps`: pairs of node ids
+        whose boxes now collide, which you should fix."""
         if not nodes and not edges:
             raise ToolError("nothing to add")
         return write(ctx, canvas_id, ops.add_elements(nodes, edges, direction))
@@ -232,7 +236,8 @@ def build(db: Database, settings: Settings,
     def layout(ctx: Context, canvas_id: str, node_ids: list[str] | None = None,
                direction: Direction = "TB") -> dict:
         """Tidy nodes into a layered layout following the edges (all nodes by
-        default). Groups move with their contents and are refitted."""
+        default). Groups move with their contents and are refitted. Returns each
+        moved node's box and any `overlaps`."""
         return write(ctx, canvas_id, ops.relayout(node_ids, direction))
 
     @server.tool()
@@ -275,8 +280,8 @@ def build(db: Database, settings: Settings,
     def apply_template(ctx: Context, canvas_id: str, template_id: str,
                        x: int | None = None, y: int | None = None) -> dict:
         """Drop a template's nodes onto a canvas with fresh ids, its top-left at
-        (x, y), or beside the existing drawing if omitted. Returns the new ids;
-        edit their text with update_elements."""
+        (x, y), or beside the existing drawing if omitted. Returns the new ids,
+        their boxes and any `overlaps`; edit their text with update_elements."""
         def go(s, user, who):
             t = templates.get(s, user, template_id)
             if t is None:

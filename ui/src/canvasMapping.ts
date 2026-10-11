@@ -47,11 +47,6 @@ function facingSides(a: Record<string, any>, b: Record<string, any>): [Side, Sid
   return dy > 0 ? ["bottom", "top"] : ["top", "bottom"];
 }
 
-// Edge routing (styleAttributes.pathfindingMethod) -> React Flow edge type.
-// Advanced Canvas's "a-star" routes around nodes; we draw rounded right
-// angles, which is the same shape without the obstacle avoidance.
-const ROUTES: Record<string, string> = { direct: "straight", square: "step", "a-star": "smoothstep" };
-
 /** Id of the <marker> drawing this arrow shape in this colour (see Markers). */
 export function markerId(arrow: string, color: string): string {
   return `nwm-${arrow || "triangle"}-${color.replace(/[^0-9a-zA-Z]/g, "")}`;
@@ -63,7 +58,8 @@ export function edgeVisual(raw: Record<string, any>) {
   const path = attr(raw, "path");
   const marker = markerId(attr(raw, "arrow"), color);
   return {
-    type: ROUTES[attr(raw, "pathfindingMethod")] ?? "default",
+    // RoutedEdge (edges.tsx) reads styleAttributes.pathfindingMethod itself.
+    type: "routed",
     label: raw.label || undefined,
     style: {
       stroke: color,
