@@ -1,8 +1,8 @@
 // Style extensions (design §3.2). Key names and values are the Obsidian
 // Advanced Canvas plugin's `styleAttributes` (src/canvas-extensions/
 // advanced-styles/style-config.ts, checked at 4b8630c), so these documents
-// render with that plugin too. `lineWidth` is nodewright's own: the plugin
-// has no width. An absent key is the default.
+// render with that plugin too. `lineWidth` and `cornerRadius` are
+// nodewright's own: the plugin has neither. An absent key is the default.
 export type Option = { value: string; label: string };
 
 export const NODE_SHAPES: Option[] = [
@@ -62,6 +62,13 @@ export const LINE_WIDTHS: Option[] = [
   { value: "6", label: "Heavy" },
 ];
 
+// Rounding of each bend on a right-angle route or detour (edges.tsx).
+export const CORNER_RADII: Option[] = [
+  { value: "", label: "Default corners" },
+  { value: "0", label: "Sharp corners" },
+  ...[4, 8, 12, 16, 24, 32, 48].map((n) => ({ value: String(n), label: `${n}px corners` })),
+];
+
 export const DEFAULT_WIDTH = 2;
 
 export function attr(raw: Record<string, any>, key: string): string {
@@ -85,6 +92,13 @@ export function dashArray(path: string, width: number): string | undefined {
   if (path === "short-dashed") return `${w * 3} ${w * 3}`;
   if (path === "long-dashed") return `${w * 7} ${w * 4}`;
   return undefined;
+}
+
+/** The edge's corner radius in px, or undefined for the routing's default. */
+export function cornerRadius(raw: Record<string, any>): number | undefined {
+  const v = attr(raw, "cornerRadius");
+  const n = Number(v);
+  return v !== "" && n >= 0 && n <= 200 ? n : undefined;
 }
 
 export function lineWidth(raw: Record<string, any>): number {

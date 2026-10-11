@@ -7,7 +7,7 @@ import {
 } from "@xyflow/react";
 import type { CEdge, CNode } from "./canvasMapping";
 import { bezierHits, labelPoint, midpoint, orthoRoute, polyPath, type Rect, type Side } from "./routing";
-import { attr } from "./styles";
+import { attr, cornerRadius } from "./styles";
 
 // A group's title sits above its box (.nw-group-label: 600 16px, 4px gap).
 const TITLE_H = 26;
@@ -71,6 +71,7 @@ const labelBox = (label: unknown): [number, number] =>
 
 export const RoutedEdge = memo((p: EdgeProps<CEdge>) => {
   const method = attr(p.data?.raw ?? {}, "pathfindingMethod");
+  const radius = cornerRadius(p.data?.raw ?? {});
   const select = useCallback((s: ReactFlowState) => obstacleKey(s, p.source, p.target),
     [p.source, p.target]);
   const key = useStore(select);
@@ -91,16 +92,16 @@ export const RoutedEdge = memo((p: EdgeProps<CEdge>) => {
       const pts = orthoRoute(s, sSide, t, tSide, obstacles);
       if (pts) {
         const m = p.label ? labelPoint(pts, ...labelBox(p.label), obstacles, frames) : midpoint(pts);
-        return [polyPath(pts, method === "square" ? 0 : 12), m.x, m.y];
+        return [polyPath(pts, radius ?? (method === "square" ? 0 : 12)), m.x, m.y];
       }
     }
     if (orthogonal) {
-      const [d, x, y] = getSmoothStepPath({ ...base, borderRadius: method === "square" ? 0 : 8 });
+      const [d, x, y] = getSmoothStepPath({ ...base, borderRadius: radius ?? (method === "square" ? 0 : 8) });
       return [d, x, y];
     }
     const [d, x, y] = getBezierPath(base);
     return [d, x, y];
-  }, [method, key, sx, sy, tx, ty, sSide, tSide, p.sourcePosition, p.targetPosition, p.label]);
+  }, [method, radius, key, sx, sy, tx, ty, sSide, tSide, p.sourcePosition, p.targetPosition, p.label]);
 
   return (
     <BaseEdge

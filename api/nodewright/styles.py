@@ -2,7 +2,7 @@
 
 Keys and values are the Obsidian Advanced Canvas plugin's `styleAttributes`
 (checked at its commit 4b8630c), so styled documents also render there.
-`lineWidth` is nodewright's own. An absent key means the default.
+`lineWidth` and `cornerRadius` are nodewright's own. An absent key means the default.
 
 canvas_format only checks the shape (an object of strings), so documents from
 newer plugin versions with values we don't know still load. Agent writes are
@@ -23,6 +23,7 @@ EDGE = {
               "diamond-outline", "circle", "circle-outline", "blunt"},
     "pathfindingMethod": {"direct", "square", "a-star"},
     "lineWidth": {"1", "2", "3", "4", "6", "8"},
+    "cornerRadius": {"0", "4", "8", "12", "16", "24", "32", "48"},
 }
 
 KEY = "styleAttributes"

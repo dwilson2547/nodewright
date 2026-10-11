@@ -44,6 +44,18 @@ def test_agent_styles_are_checked_and_shapes_grow():
         ops.add_elements([{"text": "x", "styleAttributes": {"path": "dotted"}}], [])(doc())
 
 
+def test_agent_edges_take_a_corner_radius():
+    d = doc()
+    ops.add_elements([{"id": "a", "text": "A"}, {"id": "b", "text": "B"}],
+                     [{"fromNode": "a", "toNode": "b",
+                       "styleAttributes": {"pathfindingMethod": "square", "cornerRadius": 16}}])(d)
+    assert d["edges"][0]["styleAttributes"] == {"pathfindingMethod": "square", "cornerRadius": "16"}
+    with pytest.raises(ops.OpError, match="cornerRadius must be one of"):
+        ops.add_elements([{"id": "a", "text": "A"}, {"id": "b", "text": "B"}],
+                         [{"fromNode": "a", "toNode": "b",
+                           "styleAttributes": {"cornerRadius": "7"}}])(doc())
+
+
 def test_update_merges_style_attributes():
     d = doc()
     ops.add_elements([{"id": "a", "text": "A", "styleAttributes": {"shape": "pill",

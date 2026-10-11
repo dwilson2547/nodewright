@@ -51,6 +51,7 @@ plugin) preserves unknown keys when it re-saves a canvas.
 | Edge | `arrow` | triangle-outline, thin-triangle, halved-triangle, diamond, diamond-outline, circle, circle-outline, blunt |
 | Edge | `pathfindingMethod` | direct (straight, never rerouted), square (sharp right angles around nodes), a-star (rounded right angles around nodes); absent = curved, switching to a rounded detour when the curve would cross a node (0.5.0) |
 | Edge | `lineWidth` | 1, 2, 3, 4, 6, 8 — nodewright's own; the plugin has none |
+| Edge | `cornerRadius` | 0, 4, 8, 12, 16, 24, 32, 48 (px) — nodewright's own (0.10.0). Rounds every bend of a right-angle route or a curved edge's detour; absent = square 0, otherwise 12 (8 on the fallback step path when no route is found). No effect on `direct` or a plain curve. A bend never rounds past half its shorter neighbouring segment |
 
 Loading only checks `styleAttributes` is an object of strings, so newer plugin values still load;
 agent writes are checked strictly against the table. Snap and grid size are a per-browser editor
@@ -223,7 +224,7 @@ of editor polish.
    approved the migration).
 4. **Sharing:** ✅ (0.7.0) read-only share links (§9) and folders (§11.2); ✅ (0.8.0) workspace
    members (§11.1). Organisations with built-in roles come last in the order below.
-5. **Next, in order** (✅ user, 2026-10-11): ✅ workspace zip export (0.9.0) → edge corner radius → custom
+5. **Next, in order** (✅ user, 2026-10-11): ✅ workspace zip export (0.9.0) → ✅ edge corner radius (0.10.0) → custom
    icons and node ports → schema nodes (§12) and schematics → manual edge waypoints →
    organisations and roles.
 6. **Stretch:** marketplace (§11.5), custom roles.
@@ -257,7 +258,7 @@ phase as 0.4.0 (see `CHANGELOG.md`): MCP server, access tokens, auto-layout, edi
 updates, style guides, shapes and line styles, templates, tab links, attachments, and
 `authorize()` with a members table (no sharing UI). 0.7.0 added folders, read-only share links,
 Alembic migrations, CI and the unused-attachment sweep. 0.8.0 added workspace members, 0.9.0 workspace zip
-export. Not yet: organisations, zip import. Live updates are in-process, so the chart must stay at
+export, 0.10.0 edge corner radius. Not yet: organisations, zip import. Live updates are in-process, so the chart must stay at
 one replica until `events.py` moves to Postgres LISTEN/NOTIFY.
 
 ## 11. Future: collaboration and community 📐

@@ -41,7 +41,7 @@ import { RoutedEdge } from "./edges";
 import { Markers } from "./markers";
 import { canvasFile, TabLinksContext } from "./tablinks";
 import {
-  EDGE_ARROWS, EDGE_PATHS, EDGE_ROUTES, LINE_WIDTHS, NODE_BORDERS, NODE_SHAPES, TEXT_ALIGN,
+  CORNER_RADII, EDGE_ARROWS, EDGE_PATHS, EDGE_ROUTES, LINE_WIDTHS, NODE_BORDERS, NODE_SHAPES, TEXT_ALIGN,
   attr, withAttr, type Option,
 } from "./styles";
 
@@ -853,6 +853,11 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
                   onChange={(v) => setEdgeAttr("lineWidth", v)} />
                 <Pick title="Routing" options={EDGE_ROUTES} value={common(edgeRaws, "pathfindingMethod")}
                   onChange={(v) => setEdgeAttr("pathfindingMethod", v)} />
+                {edgeRaws.some((r) => attr(r, "pathfindingMethod") !== "direct") && (
+                  <Pick title="Corner radius (right-angle routes and detours around nodes)"
+                    options={CORNER_RADII} value={common(edgeRaws, "cornerRadius")}
+                    onChange={(v) => setEdgeAttr("cornerRadius", v)} />
+                )}
                 <Pick title="Arrowhead" options={EDGE_ARROWS} value={common(edgeRaws, "arrow")}
                   onChange={(v) => setEdgeAttr("arrow", v)} />
               </>

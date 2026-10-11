@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.10.0 - 2026-10-11
+
+### Added
+- Edge corner radius: a new `cornerRadius` style (0–48 px) rounds the bends of right-angle routes
+  and of a curved edge's detour around a node. Set it from the edge toolbar's corners picker or
+  through MCP `styleAttributes`. Edges without it look exactly as before.
+
 ## 0.9.0 - 2026-10-11
 
 ### Added

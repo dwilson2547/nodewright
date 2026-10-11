@@ -63,7 +63,9 @@ EDGE_STYLE = ("styleAttributes (optional object; omit a key for the default, a s
               + ". path is the dash pattern, pathfindingMethod the routing (default curves, "
               "switching to a rounded detour if the curve would cross a node; direct = straight, "
               "always; square = sharp right angles around nodes; a-star = rounded right angles "
-              "around nodes), arrow the arrowhead shape on whichever ends have one.")
+              "around nodes), cornerRadius the rounding in px of every bend on a right-angle "
+              "route or detour (default: square 0, otherwise 12; no effect on direct or plain "
+              "curves), arrow the arrowhead shape on whichever ends have one.")
 
 Direction = Literal["TB", "LR"]
 SCHEME = "Bearer"
