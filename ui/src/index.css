@@ -71,6 +71,8 @@ input[type="color"] { width: 24px; height: 22px; padding: 0; border: none; backg
 .nw-handle { width: 9px; height: 9px; background: var(--accent); border: 2px solid var(--node-bg); opacity: 0; transition: opacity .1s; }
 .react-flow__node:hover .nw-handle, .react-flow__node.selected .nw-handle { opacity: 1; }
 .react-flow__node.selected .nw-node { box-shadow: 0 0 0 2px var(--accent); }
+/* A selected edge: a soft accent band behind the line (edges.tsx), whatever its colour. */
+.nw-edge-halo { fill: none; stroke: var(--accent); stroke-opacity: .5; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
 /* style extensions (styles.ts) */
 .nw-node.border-dashed { border-style: dashed; }
 .nw-node.border-dotted { border-style: dotted; }

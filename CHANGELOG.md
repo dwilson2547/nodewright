@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.10.1 - 2026-10-11
+
+### Fixed
+- Lines crossing a group couldn't be clicked: groups are nodes, and React Flow draws every node
+  above every edge, so a group's body covered them. Edges now sit above group bodies and still
+  pass under other nodes.
+- A selected line now shows an accent halo and is drawn above everything while selected, so it's
+  clear which line you're editing and you can grab it where it runs under a node.
+
 ## 0.10.0 - 2026-10-11
 
 ### Added

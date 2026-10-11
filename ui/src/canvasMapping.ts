@@ -60,6 +60,10 @@ export function edgeVisual(raw: Record<string, any>) {
   return {
     // RoutedEdge (edges.tsx) reads styleAttributes.pathfindingMethod itself.
     type: "routed",
+    // Above group bodies (zIndex 0) so lines across a group stay clickable;
+    // other nodes share zIndex 1 but draw after the edge layer, so lines
+    // still pass under them.
+    zIndex: 1,
     label: raw.label || undefined,
     style: {
       stroke: color,

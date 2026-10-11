@@ -773,6 +773,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
         edgesReconnectable={!readOnly}
         multiSelectionKeyCode={["Shift", "Meta", "Control"]}
         elevateNodesOnSelect={false}
+        elevateEdgesOnSelect
         minZoom={0.05}
         maxZoom={4}
         colorMode="system"

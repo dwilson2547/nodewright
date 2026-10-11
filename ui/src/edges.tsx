@@ -103,7 +103,10 @@ export const RoutedEdge = memo((p: EdgeProps<CEdge>) => {
     return [d, x, y];
   }, [method, radius, key, sx, sy, tx, ty, sSide, tSide, p.sourcePosition, p.targetPosition, p.label]);
 
+  const width = Number(p.style?.strokeWidth) || 2;
   return (
+    <>
+    {p.selected && <path d={path} className="nw-edge-halo" style={{ strokeWidth: width + 12 }} />}
     <BaseEdge
       id={p.id}
       path={path}
@@ -120,5 +123,6 @@ export const RoutedEdge = memo((p: EdgeProps<CEdge>) => {
       style={p.style}
       interactionWidth={p.interactionWidth}
     />
+    </>
   );
 });
