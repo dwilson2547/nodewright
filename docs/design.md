@@ -34,33 +34,42 @@ files that opens as an Obsidian vault. If that stops mattering, revisit this dec
 
 The spec has **no** line style, line width, waypoints, routing mode, or node shape.
 
-### 3.2 Extensions 📐
+### 3.2 Extensions ✅ (0.4.0)
 
 Extra styling lives in additional keys on nodes/edges, never by repurposing spec fields, so every
-file stays a valid JSON Canvas document. Adopt the key names of the Obsidian *Advanced Canvas*
-plugin (`styleAttributes` object: edge path style, path routing, arrow shapes; node shape) so those
-files render with that plugin installed. ⚠ unverified: exact Advanced Canvas key names/values, and
-whether stock Obsidian preserves unknown keys when it re-saves a canvas. Check both before freezing
-the schema; if Obsidian strips unknown keys, the extensions are lost on an Obsidian round-trip and
-that must be documented, not hidden.
+file stays a valid JSON Canvas document. Keys and values are the Obsidian *Advanced Canvas*
+plugin's `styleAttributes` (✅ verified against its `style-config.ts` at commit 4b8630c), so styled
+files render in Obsidian with that plugin. ⚠ unverified: whether stock Obsidian (without the
+plugin) preserves unknown keys when it re-saves a canvas.
 
-Planned extension surface:
-
-| Element | Extension | Notes |
+| Element | `styleAttributes` key | Values (absent = default) |
 |---|---|---|
-| Edge | line style (solid/dashed/dotted), width, routing (bezier/straight/orthogonal), extra end shapes | Orthogonal routing is computed, not stored as waypoints |
-| Edge | manual waypoints | Only if routing proves insufficient; nodewright-only key |
-| Node | shape (rect, rounded, diamond, ellipse, cylinder, …) | Visio-style stencils |
-| Canvas | grid size, snap on/off | Editor preference, stored per canvas |
+| Node | `shape` | pill, diamond, parallelogram, circle, predefined-process, document, database |
+| Node | `border` | dashed, dotted, invisible |
+| Node | `textAlign` | center, right |
+| Edge | `path` | dotted, short-dashed, long-dashed |
+| Edge | `arrow` | triangle-outline, thin-triangle, halved-triangle, diamond, diamond-outline, circle, circle-outline, blunt |
+| Edge | `pathfindingMethod` | direct (straight), square (right-angle), a-star (rendered as right-angle) |
+| Edge | `lineWidth` | 1, 2, 3, 4, 6, 8 — nodewright's own; the plugin has none |
 
-### 3.3 Documents and links 📐
+Loading only checks `styleAttributes` is an object of strings, so newer plugin values still load;
+agent writes are checked strictly against the table. Snap and grid size are a per-browser editor
+preference, not stored in the canvas. Manual edge waypoints: not built.
+
+### 3.3 Documents and links ✅ (0.4.0, except zip export)
 
 - A **workspace** is a folder; each **tab** is one `.canvas` document in it.
-- Links between documents use spec `file` nodes: `file: "other.canvas"`, optional `subpath`
-  targeting a node. Clicking opens/focuses that tab. Link nodes (`url`) remain for external links.
-- Export a workspace as a zip of `.canvas` files (+ attachments); import the same.
+- Links between documents use spec `file` nodes: `file: "<tab name>.canvas"`, optional
+  `subpath: "#<node id>"`. Clicking opens that tab and selects the node. Matching is by tab name
+  (exact, then case-insensitive, then last path segment), as in Obsidian, so **renaming a tab
+  breaks links to it**. Link nodes (`url`) remain for external links.
+- **Attachments** are `file` nodes with `file: "attachments/<id>/<name>"`, stored in AIStor under
+  `attachments/<workspace>/<id>`. Images (sniffed by magic bytes) render inline; anything else is
+  a download. Not garbage-collected when a node is deleted, since undo and revisions may still
+  point at them; deleting the workspace deletes them. Exports don't embed them yet.
+- Not built: export a workspace as a zip of `.canvas` files + attachments; import the same.
 
-## 4. Templates 📐
+## 4. Templates ✅ (0.4.0)
 
 A template is a JSON Canvas fragment with coordinates relative to its own origin, stored per user.
 
@@ -70,7 +79,10 @@ A template is a JSON Canvas fragment with coordinates relative to its own origin
 - **Page templates:** a whole canvas; the "default page" for a new tab is the user's chosen page
   template. Ship a small built-in set.
 
-Insertion = offset coordinates, regenerate ids, snap to grid.
+Insertion = offset coordinates, regenerate ids, snap to grid. Built: built-in stencils, snippets
+and pages; user templates of each kind; per-user default page applied to new workspaces and tabs;
+palette insert by click (nearest free grid slot to the view centre) or drag; MCP
+`list_templates` / `apply_template` / `save_template`.
 
 ## 5. Architecture 📐
 
@@ -177,8 +189,9 @@ of editor polish.
    styling, import/export.
 2. ✅ (0.2.0) **Agents:** personal access tokens, the §7 tool set, layout engine, live push to open tabs (SSE),
    edit leases (§11.3), style guides (§11.4).
-3. **Editor:** shapes and edge line styles (§3.2), templates and default pages (§4), folders (§11.2),
-   attachments (AIStor).
+3. ✅ (0.4.0) **Editor:** shapes and edge line styles (§3.2), templates and default pages (§4),
+   tab links and attachments (§3.3). Folders (§11.2) deferred: they are the first change to an
+   existing table, so they wait for Alembic (needs the user's go-ahead).
 4. **Sharing:** read-only share links, workspace members, organisations with built-in roles (§11.1).
 5. **Stretch:** marketplace (§11.5), custom roles, workspace zip import/export.
 
@@ -201,12 +214,13 @@ Resolved 2026-10-10 (✅ user):
 
 ## 10. Status
 
-Phase 1 ✅ deployed 2026-10-11 as 0.1.0; phase 2 ✅ as 0.2.0, MCP OAuth sign-in as 0.3.0 (see `CHANGELOG.md`): MCP server,
-access tokens, auto-layout, edit leases, SSE live updates, style guides, and `authorize()` with a
-members table (no sharing UI). Not yet: shapes and edge line styles (§3.2), templates (§4), folders,
-share links, attachments, Alembic (schema is `create_all` at startup, which only adds tables; the
-first change to an existing table needs migrations set up). Live updates are in-process, so the
-chart must stay at one replica until `events.py` moves to Postgres LISTEN/NOTIFY.
+Phase 1 ✅ deployed 2026-10-11 as 0.1.0; phase 2 ✅ as 0.2.0, MCP OAuth sign-in as 0.3.0, editor
+phase as 0.4.0 (see `CHANGELOG.md`): MCP server, access tokens, auto-layout, edit leases, SSE live
+updates, style guides, shapes and line styles, templates, tab links, attachments, and
+`authorize()` with a members table (no sharing UI). Not yet: folders, share links, zip
+export, Alembic (schema is `create_all` at startup, which only adds tables; the first change to an
+existing table needs migrations set up). Live updates are in-process, so the chart must stay at
+one replica until `events.py` moves to Postgres LISTEN/NOTIFY.
 
 ## 11. Future: collaboration and community 📐
 

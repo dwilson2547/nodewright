@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.4.0 - 2026-10-11
+
+### Added
+- Node shapes (pill, diamond, parallelogram, circle, predefined process, document, database),
+  dashed/dotted/invisible borders and text alignment; edge dash patterns, line widths, routing
+  (curved, straight, right-angle) and arrowhead shapes. Stored as Advanced Canvas
+  `styleAttributes` so styled files render in Obsidian with that plugin; `lineWidth` is ours.
+- Templates: built-in stencils, snippets and pages plus user templates ("Save as template",
+  "Save this canvas as a page"). A palette inserts by click (nearest free grid slot) or drag.
+  New workspaces and tabs start from the user's default page. MCP: `list_templates`,
+  `apply_template`, `save_template`.
+- Tab links: spec `file` nodes pointing at `<tab name>.canvas` (optional `#<node id>` subpath)
+  open that tab and select the node. "+ Tab link…" in the toolbar; agents can add them too.
+- Attachments: drop, paste or "+ File" to upload images and files (20 MB each) to AIStor.
+  Images render inline; other files are download cards. MCP: `list_attachments`.
+
+### Security
+- Attachments are served inline only when the bytes sniff as PNG/JPEG/GIF/WEBP/AVIF (never SVG);
+  everything else downloads as `application/octet-stream`. All responses carry
+  `Content-Security-Policy: default-src 'none'; sandbox`.
+
 ## [0.3.1]
 
 ### Fixed
