@@ -170,3 +170,98 @@ def test_mcp_tab_links(mcp):  # noqa: F811
     assert node["width"] > 0 and node["height"] > 0
     tools = {t["name"]: t for t in m.rpc("tools/list").json()["result"]["tools"]}
     assert "<tab name>.canvas" in str(tools["add_elements"]["inputSchema"])
+
+
+# --- attachments ---------------------------------------------------------------
+
+PNG = b"\x89PNG\r\n\x1a\n" + b"\0" * 64
+
+
+@pytest.fixture
+def files(settings, tmp_path):
+    from dataclasses import replace
+
+    from nodewright.main import create_app
+    from nodewright.storage import MemoryStore
+
+    from .conftest import FakeProvider, sign_in
+
+    st = MemoryStore()
+    s2 = replace(settings, max_attachment_bytes=1000)
+    provider = FakeProvider(s2)
+    app = create_app(s2, provider, store=st)
+    return app, provider, st, sign_in
+
+
+def test_attachments_upload_serve_and_delete(files):
+    app, provider, st, sign_in = files
+    alice = sign_in(app, provider, "alice")
+    ws = alice.get("/api/workspaces").json()[0]["id"]
+    up = lambda body, name, ctype="application/octet-stream": alice.post(  # noqa: E731
+        f"/api/workspaces/{ws}/attachments", content=body,
+        headers={**H, "Content-Type": ctype, "X-Filename": name})
+
+    assert alice.get("/api/config").json()["attachments"] is True
+    # Declared as text, but the bytes are a PNG: it is an image.
+    img = up(PNG, "diagram%20%E2%9C%93.png", "text/html").json()
+    assert img["image"] and img["content_type"] == "image/png"
+    assert img["file"] == f"attachments/{img['id']}/diagram ✓.png"
+    r = alice.get(img["url"])
+    assert r.status_code == 200 and r.content == PNG
+    assert r.headers["content-type"] == "image/png"
+    assert r.headers["content-disposition"].startswith("inline;")
+    assert "sandbox" in r.headers["content-security-policy"]
+    assert r.headers["x-content-type-options"] == "nosniff"
+
+    # Anything else downloads, whatever it claims to be; names are sanitised.
+    html = up(b"<script>alert(1)</script>", "..%2F..%2Fevil.html", "text/html").json()
+    assert not html["image"] and html["name"] == "evil.html"
+    r = alice.get(html["url"])
+    assert r.headers["content-type"] == "application/octet-stream"
+    assert r.headers["content-disposition"].startswith("attachment;")
+    svg = up(b"<svg xmlns='http://www.w3.org/2000/svg'/>", "x.svg", "image/svg+xml").json()
+    assert not svg["image"]
+
+    assert up(b"x" * 1001, "big.bin").status_code == 413
+    assert up(b"", "empty.bin").status_code == 422
+    assert alice.post(f"/api/workspaces/{ws}/attachments", content=PNG).status_code == 403
+
+    listed = alice.get(f"/api/workspaces/{ws}/attachments").json()["attachments"]
+    assert {a["id"] for a in listed} == {img["id"], html["id"], svg["id"]}
+
+    bob = sign_in(app, provider, "bob")
+    assert bob.get(img["url"]).status_code == 404
+    assert bob.get(f"/api/workspaces/{ws}/attachments").status_code == 404
+    assert bob.post(f"/api/workspaces/{ws}/attachments", content=PNG, headers=H).status_code == 404
+
+    assert alice.delete(img["url"], headers=H).status_code == 204
+    assert alice.get(img["url"]).status_code == 404
+    assert len(st.objects) == 2
+    assert alice.delete(f"/api/workspaces/{ws}", headers=H).status_code == 204
+    assert st.objects == {}
+
+
+def test_attachments_off_without_a_store(client):
+    assert client.get("/api/config").json()["attachments"] is False
+    ws = client.get("/api/workspaces").json()[0]["id"]
+    r = client.post(f"/api/workspaces/{ws}/attachments", content=PNG, headers=H)
+    assert r.status_code == 404
+
+
+def test_attachment_names_and_sniffing():
+    from nodewright import attachments as at
+    assert at.clean_name("C:\\Users\\me\\photo.jpg") == "photo.jpg"
+    assert at.clean_name('a<b>"c".txt') == "abc.txt"
+    assert at.clean_name("...") == "file" and at.clean_name(None) == "file"
+    assert at.sniff(b"RIFF\0\0\0\0WEBPVP8 ") == "image/webp"
+    assert at.sniff(b"\0\0\0\x1cftypavif") == "image/avif"
+    assert at.content_type(b"%PDF-1.7", "application/pdf; x=y") == "application/pdf"
+    assert at.content_type(b"x", "not a type") == "application/octet-stream"
+    assert at.attachment_id("attachments/" + "a" * 32 + "/x.png") == "a" * 32
+    assert at.attachment_id("notes/x.png") is None
+
+
+def test_mcp_lists_attachments(mcp):  # noqa: F811
+    m, web = mcp
+    ws = m.call("list_workspaces")["workspaces"][0]["id"]
+    assert m.call("list_attachments", workspace_id=ws)["attachments"] == []

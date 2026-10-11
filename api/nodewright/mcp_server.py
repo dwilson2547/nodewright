@@ -21,11 +21,11 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.streamable_http_manager import StreamableHTTPASGIApp
 from mcp.server.transport_security import TransportSecuritySettings
 
-from . import (__version__, access, canvas_format, leases, ops, styleguide, styles, templates,
-               tokens)
+from . import (__version__, access, attachments, canvas_format, leases, ops, storage, styleguide,
+               styles, templates, tokens)
 from .config import Settings
 from .db import Database
-from .models import Canvas, User, Workspace
+from .models import Attachment, Canvas, User, Workspace
 
 INSTRUCTIONS = """\
 nodewright is a diagram editor; its documents are JSON Canvas files ("canvases"),
@@ -50,6 +50,8 @@ grouped as tabs in workspaces. You are acting for the signed-in user who connect
   file node with {"file": "<tab name>.canvas"} and optionally {"subpath": "#<node id>"}
   to land on a node; the user clicks it to open that tab. Tab names come from
   list_workspaces; links follow the name, so rename the link if you rename the tab.
+- Files the user uploaded (screenshots, logos, PDFs) are listed by list_attachments; show
+  one with a file node whose `file` is the attachment's `file` value. Images render inline.
 - The user sees your changes live in their browser.
 """
 
@@ -94,7 +96,8 @@ class McpAuth:
         await self.inner(scope, receive, send)
 
 
-def build(db: Database, settings: Settings) -> tuple[MCPServer, ASGIApp]:
+def build(db: Database, settings: Settings,
+          store: storage.Store | None = None) -> tuple[MCPServer, ASGIApp]:
     server = MCPServer(name="nodewright", version=__version__, instructions=INSTRUCTIONS,
                        website_url=settings.public_url)
 
@@ -297,6 +300,23 @@ def build(db: Database, settings: Settings) -> tuple[MCPServer, ASGIApp]:
             except templates.TemplateError as exc:
                 raise ToolError(str(exc)) from None
             return {"template_id": t.id, "kind": t.kind, "nodes": len(t.data["nodes"])}
+        return run(ctx, go)
+
+    @server.tool()
+    def list_attachments(ctx: Context, workspace_id: str) -> dict:
+        """Files uploaded to a workspace (images and others). To show one, add a
+        file node with `file` set to its `file` value; size an image node to
+        roughly its aspect ratio."""
+        if store is None:
+            return {"attachments": [], "note": "attachments are not set up on this server"}
+
+        def go(s, user, who):
+            from sqlalchemy import select
+            ws = access.workspace(s, user, workspace_id)
+            rows = s.scalars(select(Attachment).where(Attachment.workspace_id == ws.id)
+                             .order_by(Attachment.created_at.desc())).all()
+            return {"attachments": [{k: v for k, v in attachments.out(a).items() if k != "url"}
+                                    for a in rows]}
         return run(ctx, go)
 
     @server.tool()

@@ -161,3 +161,11 @@ input[type="color"] { width: 24px; height: 22px; padding: 0; border: none; backg
 .nw-canvaslink { border-style: solid; border-left-width: 4px; }
 .nw-tablink { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: none; border: none; padding: 0; font: inherit; color: var(--accent, #6d4aff); cursor: pointer; text-align: left; }
 .nw-tablink:hover { text-decoration: underline; }
+
+/* attachments (file nodes pointing at "attachments/<id>/<name>") */
+.nw-attachment { padding: 0; overflow: hidden; }
+.nw-attachment .nw-body { padding: 8px 12px; }
+.nw-image { display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; user-select: none; }
+.nw-download { color: var(--accent); text-decoration: none; overflow-wrap: anywhere; }
+.nw-download:hover { text-decoration: underline; }
+.editor.drop-files::after { content: "Drop to upload"; position: absolute; inset: 8px; border: 2px dashed var(--accent); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 18px; color: var(--accent); background: #7852ee10; pointer-events: none; z-index: 10; }

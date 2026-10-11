@@ -3,7 +3,7 @@ import { Handle, NodeResizer, Position, useReactFlow, type NodeProps } from "@xy
 import { resolveColor, type CNode } from "./canvasMapping";
 import { Markdown, safeUrl } from "./markdown";
 import { attr } from "./styles";
-import { TabLinksContext, isCanvasFile, linkTarget, subpathNode } from "./tablinks";
+import { attachmentOf, TabLinksContext, isCanvasFile, linkTarget, subpathNode } from "./tablinks";
 
 const SIDES: [string, Position][] = [
   ["top", Position.Top],
@@ -186,17 +186,33 @@ function CanvasLink({ raw }: { raw: Record<string, any> }) {
   );
 }
 
+function AttachmentView({ raw }: { raw: Record<string, any> }) {
+  const a = attachmentOf(String(raw.file ?? ""))!;
+  const [broken, setBroken] = useState(false);
+  if (a.image && !broken) {
+    return <img className="nw-image" src={a.url} alt={a.name} draggable={false} onError={() => setBroken(true)} />;
+  }
+  return (
+    <div className="nw-body">
+      <div className="nw-kind">{broken ? "missing image" : "file"}</div>
+      <a className="nodrag nw-download" href={a.url} download={a.name} title={`Download ${a.name}`}>⤓ {a.name}</a>
+    </div>
+  );
+}
+
 export const FileNode = memo(({ id, data, selected }: NodeProps<CNode>) => {
   const raw = data.raw;
   const ed = useEditable(id, raw, "file");
   const tabLink = isCanvasFile(String(raw.file ?? ""));
+  const attached = !!attachmentOf(String(raw.file ?? ""));
   return (
-    <div className={look(raw, "file").cls + (tabLink ? " nw-canvaslink" : "")} style={colorStyle(raw)} onDoubleClick={ed.start}>
+    <div className={look(raw, "file").cls + (tabLink ? " nw-canvaslink" : "") + (attached ? " nw-attachment" : "")}
+      style={colorStyle(raw)} onDoubleClick={attached ? undefined : ed.start}>
       <NodeResizer isVisible={selected} minWidth={80} minHeight={30} />
       <Handles />
       {ed.editing ? (
         <Editor value={ed.draft} onChange={ed.setDraft} onCommit={ed.commit} onCancel={ed.cancel} multiline={false} />
-      ) : tabLink ? <CanvasLink raw={raw} /> : (
+      ) : attached ? <AttachmentView raw={raw} /> : tabLink ? <CanvasLink raw={raw} /> : (
         <div className="nw-body">
           <div className="nw-kind">file</div>
           <span>{raw.file}{raw.subpath ?? ""}</span>

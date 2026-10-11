@@ -31,7 +31,17 @@ async function call<T>(method: string, url: string, body?: unknown): Promise<T> 
 }
 
 export type Me = { id: string; username: string };
-export type Config = { oidc: boolean; dev_login: boolean; max_canvas_bytes: number; version: string };
+export type Config = {
+  oidc: boolean;
+  dev_login: boolean;
+  max_canvas_bytes: number;
+  version: string;
+  attachments: boolean;
+  max_attachment_bytes: number;
+};
+export type Attachment = {
+  id: string; name: string; content_type: string; size: number; image: boolean; file: string; url: string;
+};
 export type Workspace = { id: string; name: string; updated_at: string };
 export type CanvasMeta = {
   id: string;
@@ -97,6 +107,22 @@ export const api = {
     call<Template>("POST", "/api/templates", { name, kind, data }),
   renameTemplate: (id: string, name: string) => call<Template>("PATCH", `/api/templates/${id}`, { name }),
   deleteTemplate: (id: string) => call("DELETE", `/api/templates/${id}`),
+  uploadAttachment: async (wsId: string, file: File): Promise<Attachment> => {
+    const r = await fetch(`/api/workspaces/${wsId}/attachments`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        "X-Nodewright": "1",
+        "X-Nodewright-Client": CLIENT_ID,
+        "Content-Type": file.type || "application/octet-stream",
+        "X-Filename": encodeURIComponent(file.name),
+      },
+      body: file,
+    });
+    const data = await r.json().catch(() => null);
+    if (!r.ok) throw new ApiError(r.status, data);
+    return data as Attachment;
+  },
   setDefaultPage: (template: string) =>
     call<{ default_page: string }>("PUT", "/api/templates-default-page", { template }),
 };

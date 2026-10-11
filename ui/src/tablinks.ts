@@ -31,3 +31,14 @@ export function linkTarget(file: string, tabs: CanvasMeta[]): CanvasMeta | undef
 }
 
 export const subpathNode = (subpath?: string) => (subpath ? subpath.replace(/^#\^?/, "") || undefined : undefined);
+
+// Attachments: a file node whose `file` is "attachments/<id>/<name>".
+const ATTACHMENT = /^attachments\/([0-9a-f]{32})(?:\/(.*))?$/;
+const IMAGE_EXT = /\.(png|jpe?g|gif|webp|avif)$/i;
+
+export function attachmentOf(file: string): { id: string; name: string; url: string; image: boolean } | undefined {
+  const m = ATTACHMENT.exec(file);
+  if (!m) return undefined;
+  const name = m[2] || "file";
+  return { id: m[1], name, url: `/api/attachments/${m[1]}`, image: IMAGE_EXT.test(name) };
+}

@@ -293,7 +293,8 @@ export default function App() {
           <TabLinksContext.Provider value={{ tabs, current: tabId, open: (id, node) => void followLink(id, node) }}>
             <ReactFlowProvider key={tabId}>
               <Editor ref={editor} canvasId={tabId} onStatus={setStatus}
-                focusNode={focus?.canvas === tabId ? focus.node : undefined} />
+                focusNode={focus?.canvas === tabId ? focus.node : undefined}
+                attachmentLimit={config.attachments ? config.max_attachment_bytes : undefined} />
             </ReactFlowProvider>
           </TabLinksContext.Provider>
         )}

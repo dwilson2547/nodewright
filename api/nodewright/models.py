@@ -261,3 +261,23 @@ class UserPrefs(Base):
         ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
     default_page: Mapped[str | None] = mapped_column(String(64), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Attachment(Base):
+    """A file uploaded into a workspace; the bytes live in the object store
+    under `key`. A file node refers to it as "attachments/<id>/<name>"."""
+    __tablename__ = "attachments"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    workspace_id: Mapped[str] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
+    uploader_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    name: Mapped[str] = mapped_column(String(200))
+    content_type: Mapped[str] = mapped_column(String(100))
+    size: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    @property
+    def key(self) -> str:
+        return f"attachments/{self.workspace_id}/{self.id}"

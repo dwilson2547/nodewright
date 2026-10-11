@@ -8,10 +8,10 @@ import json
 import logging
 import os
 import re
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote, unquote, urlsplit
 from datetime import datetime
 
-from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse, RedirectResponse,
                                StreamingResponse)
 from pydantic import BaseModel, Field
@@ -22,11 +22,11 @@ from mcp.server.auth.settings import ClientRegistrationOptions, RevocationOption
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict
 from starlette.routing import Route
 
-from . import (__version__, access, auth, canvas_format, events, leases, mcp_server, oauth,
-               oidc, styleguide, templates, tokens)
+from . import (__version__, access, attachments, auth, canvas_format, events, leases,
+               mcp_server, oauth, oidc, storage, styleguide, templates, tokens)
 from .config import Settings
 from .db import Database
-from .models import (AccessToken, Canvas, CanvasRevision, OAuthGrant, StyleGuide, Template, User,
+from .models import (AccessToken, Attachment, Canvas, CanvasRevision, OAuthGrant, StyleGuide, Template, User,
                      Workspace, utcnow)
 
 log = logging.getLogger("nodewright")
@@ -92,8 +92,10 @@ class _Issuer(BaseModel):
     u: AnyHttpUrl
 
 
-def create_app(settings: Settings | None = None, provider: oidc.Provider | None = None) -> FastAPI:
+def create_app(settings: Settings | None = None, provider: oidc.Provider | None = None,
+               store: storage.Store | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
+    store = store or storage.from_settings(settings)
     broker = events.Broker()
     db = Database(settings.database_url, broker)
     db.create_schema()
@@ -102,7 +104,7 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
     if settings.dev_login and not settings.dev_login_enabled:
         log.warning("DEV_LOGIN ignored: PUBLIC_URL is https")
 
-    mcp, mcp_app = mcp_server.build(db, settings)
+    mcp, mcp_app = mcp_server.build(db, settings, store)
 
     @contextlib.asynccontextmanager
     async def lifespan(_app):
@@ -112,6 +114,7 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
     app = FastAPI(title="nodewright", version=__version__, docs_url=None, redoc_url=None,
                   openapi_url=None, lifespan=lifespan)
     app.state.settings, app.state.db, app.state.broker = settings, db, broker
+    app.state.store = store
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
@@ -180,7 +183,9 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
     @app.get("/api/config")
     def public_config():
         return {"oidc": provider is not None, "dev_login": settings.dev_login_enabled,
-                "max_canvas_bytes": settings.max_canvas_bytes, "version": __version__}
+                "max_canvas_bytes": settings.max_canvas_bytes, "version": __version__,
+                "attachments": store is not None,
+                "max_attachment_bytes": settings.max_attachment_bytes}
 
     @app.get("/api/me")
     def me(user: User = Depends(user_dep)):
@@ -272,9 +277,16 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
         return _ws_out(ws)
 
     @app.delete("/api/workspaces/{ws_id}", status_code=204)
-    def delete_workspace(ws_id: str, user: User = Depends(user_dep),
+    def delete_workspace(ws_id: str, tasks: BackgroundTasks, user: User = Depends(user_dep),
                          s: Session = Depends(session)):
-        s.delete(workspace_for(s, user, ws_id, access.MANAGE))
+        ws = workspace_for(s, user, ws_id, access.MANAGE)
+        files = s.scalars(select(Attachment).where(Attachment.workspace_id == ws.id)).all()
+        keys = [a.key for a in files]
+        for a in files:
+            s.delete(a)
+        s.delete(ws)
+        if store and keys:
+            tasks.add_task(drop_objects, keys)
         return Response(status_code=204)
 
     # --- canvases (tabs) ----------------------------------------------------
@@ -524,6 +536,91 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
         except templates.TemplateError as exc:
             raise HTTPException(422, str(exc)) from None
         return {"default_page": body.template}
+
+    # --- attachments (attachments.py, storage.py) -----------------------------
+
+    def drop_objects(keys: list[str]) -> None:
+        for k in keys:
+            try:
+                store.delete(k)
+            except Exception:  # noqa: BLE001
+                log.warning("attachments: could not delete %s", k, exc_info=True)
+
+    def need_store() -> storage.Store:
+        if store is None:
+            raise HTTPException(404, "attachments are not set up on this server")
+        return store
+
+    @app.get("/api/workspaces/{ws_id}/attachments")
+    def list_attachments(ws_id: str, user: User = Depends(user_dep),
+                         s: Session = Depends(session)):
+        ws = workspace_for(s, user, ws_id)
+        rows = s.scalars(select(Attachment).where(Attachment.workspace_id == ws.id)
+                         .order_by(Attachment.created_at.desc())).all()
+        return {"attachments": [attachments.out(a) for a in rows]}
+
+    @app.post("/api/workspaces/{ws_id}/attachments", status_code=201)
+    async def upload_attachment(ws_id: str, request: Request, user: User = Depends(user_dep),
+                                s: Session = Depends(session)):
+        st = need_store()
+        ws = workspace_for(s, user, ws_id, access.CANVAS_EDIT)
+        limit = settings.max_attachment_bytes
+        declared = request.headers.get("content-length")
+        if declared and declared.isdigit() and int(declared) > limit:
+            raise HTTPException(413, f"files are limited to {limit // (1024 * 1024)} MB")
+        chunks, size = [], 0
+        async for chunk in request.stream():
+            size += len(chunk)
+            if size > limit:
+                raise HTTPException(413, f"files are limited to {limit // (1024 * 1024)} MB")
+            chunks.append(chunk)
+        data = b"".join(chunks)
+        if not data:
+            raise HTTPException(422, "the file is empty")
+        a = Attachment(workspace_id=ws.id, uploader_id=user.id, size=len(data),
+                       name=attachments.clean_name(unquote(request.headers.get("x-filename", ""))),
+                       content_type=attachments.content_type(
+                           data, request.headers.get("content-type")))
+        s.add(a)
+        s.flush()
+        try:
+            await asyncio.to_thread(st.put, a.key, data, a.content_type)
+        except Exception:  # noqa: BLE001
+            log.exception("attachments: upload to the store failed")
+            raise HTTPException(502, "couldn't store the file; try again") from None
+        return attachments.out(a)
+
+    @app.get("/api/attachments/{att_id}")
+    def get_attachment(att_id: str, user: User = Depends(user_dep),
+                       s: Session = Depends(session)):
+        st = need_store()
+        a = s.get(Attachment, att_id)
+        if a is None:
+            raise HTTPException(404, "no such attachment")
+        workspace_for(s, user, a.workspace_id)
+        try:
+            body = st.get(a.key)
+        except KeyError:
+            raise HTTPException(404, "the file is missing from storage") from None
+        inline = a.content_type in attachments.INLINE
+        disposition = ("inline" if inline else "attachment") + "; filename*=UTF-8''" + quote(a.name)
+        return StreamingResponse(body, media_type=a.content_type if inline else
+                                 "application/octet-stream", headers={
+            "Content-Disposition": disposition, "Content-Length": str(a.size),
+            "Content-Security-Policy": "default-src 'none'; sandbox",
+            "Cache-Control": "private, max-age=31536000, immutable"})
+
+    @app.delete("/api/attachments/{att_id}", status_code=204)
+    def delete_attachment(att_id: str, tasks: BackgroundTasks, user: User = Depends(user_dep),
+                          s: Session = Depends(session)):
+        need_store()
+        a = s.get(Attachment, att_id)
+        if a is None:
+            raise HTTPException(404, "no such attachment")
+        workspace_for(s, user, a.workspace_id, access.CANVAS_EDIT)
+        tasks.add_task(drop_objects, [a.key])
+        s.delete(a)
+        return Response(status_code=204)
 
     # --- OAuth for MCP clients (oauth.py) ------------------------------------
 

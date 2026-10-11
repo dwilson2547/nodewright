@@ -94,9 +94,15 @@ function splitDoc(doc: JsonCanvas) {
   return extra;
 }
 
-type Props = { canvasId: string; onStatus: (s: SaveStatus) => void; focusNode?: string };
+type Props = {
+  canvasId: string;
+  onStatus: (s: SaveStatus) => void;
+  focusNode?: string;
+  /** Upload limit in bytes when the server stores attachments, else undefined. */
+  attachmentLimit?: number;
+};
 
-export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId, onStatus, focusNode }, ref) {
+export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId, onStatus, focusNode, attachmentLimit }, ref) {
   const [nodes, setNodes, onNodesChange] = useNodesState<CNode>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<CEdge>([]);
   const [loaded, setLoaded] = useState(false);
@@ -115,6 +121,9 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
   const flow = useReactFlow<CNode, CEdge>();
   const tabLinks = useContext(TabLinksContext);
   const wrapper = useRef<HTMLDivElement>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const workspaceId = useRef<string | null>(null);
+  const [dropping, setDropping] = useState(false);
 
   const extra = useRef<Record<string, unknown>>({});
   const revision = useRef(0);
@@ -167,6 +176,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
       (c) => {
         if (!alive) return;
         revision.current = c.revision;
+        workspaceId.current = c.workspace_id;
         setLease(c.lease);
         setCanEdit(c.can_edit);
         const s = apply(c.data);
@@ -470,13 +480,73 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
     setEdges((es) => [...es.map((e) => ({ ...e, selected: false })), ...f.edges]);
   };
 
+  // Upload files into the workspace and add a file node for each: images at
+  // their aspect ratio (at most 480×360), anything else as a download card.
+  const uploadFiles = async (files: File[], at?: { x: number; y: number }) => {
+    if (!attachmentLimit || readOnly || !workspaceId.current || files.length === 0) return;
+    let pos = at;
+    for (const f of files) {
+      if (f.size > attachmentLimit) {
+        flash(`${f.name} is over the ${Math.round(attachmentLimit / 1048576)} MB limit.`);
+        continue;
+      }
+      flash(`Uploading ${f.name}…`);
+      let a;
+      try {
+        a = await api.uploadAttachment(workspaceId.current, f);
+      } catch (e) {
+        const detail = e instanceof ApiError ? e.body?.detail ?? `error ${e.status}` : String(e);
+        flash(`Couldn't upload ${f.name}: ${detail}`);
+        continue;
+      }
+      let [w, h] = [260, 70];
+      if (a.image) {
+        try {
+          const b = await createImageBitmap(f);
+          const k = Math.min(1, 480 / b.width, 360 / b.height);
+          [w, h] = [Math.max(40, Math.round(b.width * k)), Math.max(30, Math.round(b.height * k))];
+          b.close();
+        } catch {
+          [w, h] = [320, 240];
+        }
+      }
+      const p = pos ?? freeSpot(w, h);
+      const raw: Record<string, any> = { id: newId(), type: "file", file: a.file, x: snapTo(p.x), y: snapTo(p.y), width: w, height: h };
+      const node: CNode = {
+        id: raw.id, type: "file", position: { x: raw.x, y: raw.y }, width: w, height: h, zIndex: 1, data: { raw }, selected: true,
+      };
+      setNodes((ns) => [...ns.map((n) => ({ ...n, selected: false })), node]);
+      if (pos) pos = { x: pos.x + 40, y: pos.y + 40 };
+      flash(`Added ${f.name}`);
+    }
+  };
+
+  const draggingFiles = (e: React.DragEvent) => !!attachmentLimit && !readOnly && e.dataTransfer.types.includes("Files");
+
   const onDragOver = (e: React.DragEvent) => {
+    if (draggingFiles(e)) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "copy";
+      if (!dropping) setDropping(true);
+      return;
+    }
     if (readOnly || !e.dataTransfer.types.includes(DRAG_TYPE)) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = "copy";
   };
 
+  const onDragLeave = (e: React.DragEvent) => {
+    if (!e.currentTarget.contains(e.relatedTarget as Element | null)) setDropping(false);
+  };
+
   const onDrop = async (e: React.DragEvent) => {
+    setDropping(false);
+    if (draggingFiles(e) && e.dataTransfer.files.length > 0) {
+      e.preventDefault();
+      const at = flow.screenToFlowPosition({ x: e.clientX, y: e.clientY });
+      await uploadFiles([...e.dataTransfer.files], at);
+      return;
+    }
     const id = e.dataTransfer.getData(DRAG_TYPE);
     if (readOnly || !id) return;
     e.preventDefault();
@@ -637,6 +707,25 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
     return () => window.removeEventListener("keydown", onKey);
   }, [step, flush, readOnly]);
 
+  // Pasting an image (e.g. a screenshot) uploads it, unless typing in a field.
+  const uploadRef = useRef(uploadFiles);
+  useEffect(() => {
+    uploadRef.current = uploadFiles;
+  });
+  useEffect(() => {
+    if (readOnly || !attachmentLimit) return;
+    const onPaste = (e: ClipboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.closest("input, textarea, select") || t.isContentEditable)) return;
+      const files = [...(e.clipboardData?.files ?? [])];
+      if (files.length === 0) return;
+      e.preventDefault();
+      void uploadRef.current(files);
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, [readOnly, attachmentLimit]);
+
   useEffect(() => {
     localStorage.setItem("nw.snap", JSON.stringify(snap));
   }, [snap]);
@@ -654,8 +743,9 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
 
   return (
     <ReadOnly.Provider value={readOnly}>
-    <div className={"editor" + (readOnly ? " readonly" : "") + (paletteOpen ? " with-palette" : "")} ref={wrapper}
-      onDoubleClick={onPaneDoubleClick} onDragOver={onDragOver} onDrop={(e) => void onDrop(e)}>
+    <div className={"editor" + (readOnly ? " readonly" : "") + (paletteOpen ? " with-palette" : "") + (dropping ? " drop-files" : "")}
+      ref={wrapper} onDoubleClick={onPaneDoubleClick} onDragOver={onDragOver} onDragLeave={onDragLeave}
+      onDrop={(e) => void onDrop(e)}>
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -695,6 +785,17 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
           <button onClick={() => addNode("text")} title="Add a text card (or double-click the canvas)">+ Text</button>
           <button onClick={() => addNode("group")}>+ Group</button>
           <button onClick={() => addNode("link")}>+ Link</button>
+          {attachmentLimit !== undefined && (
+            <>
+              <button onClick={() => fileInput.current?.click()}
+                title="Upload images or files (you can also drop or paste them onto the canvas)">+ File</button>
+              <input ref={fileInput} type="file" multiple hidden onChange={(e) => {
+                const fs = [...(e.target.files ?? [])];
+                e.target.value = "";
+                void uploadFiles(fs);
+              }} />
+            </>
+          )}
           {tabLinks.tabs.length > 1 && (
             <select value="" aria-label="Link to tab" title="Add a card that opens another tab of this workspace"
               onChange={(e) => {
