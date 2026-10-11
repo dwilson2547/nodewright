@@ -92,6 +92,13 @@ nodewright/
   and to recover from bad agent edits.
 - **Storage:** cluster Postgres (`infra/cluster-config/postgres`). ⚠ unverified: capacity/ops
   conventions for adding a database there — read cluster-config docs first.
+- **Attachments** (images and other files referenced by `file` nodes): AIStor object storage
+  (✅ user decision 2026-10-10), in a dedicated `nodewright` bucket. Follows the dxf-converter
+  pattern (`infra/cluster-config/example-secrets/dxf-converter/secret.yml`): AIStor on TrueNAS,
+  S3 API at `http://192.168.0.10:30320` (the console on `:30321` is not the API); endpoint and
+  bucket go in the chart's `values.yaml`, only the access keys in a hand-applied Secret.
+  The browser never talks to AIStor directly — the API proxies or presigns, so the bucket stays
+  private and LAN-only.
 - **Live updates:** server pushes canvas changes over SSE or WebSocket so an open tab shows agent
   edits as they happen. Writes carry the base revision; conflicting writes are rejected (optimistic
   concurrency) rather than merged.
@@ -153,6 +160,16 @@ needs an explicit stop line.
 
 ## 9. Open questions
 
-- Public instance (like canvas-viewer's `*.danwils.com`) or LAN-only? Affects who may sign up.
-- Sharing: per-canvas read-only links, and should they reuse canvas-viewer?
-- Attachment/image storage for file nodes (Postgres blobs vs. object storage).
+Resolved 2026-10-10 (✅ user):
+
+- **Public** at `https://nodewright.danwils.com`. Who may sign up is controlled in authentik.
+- **Attachments** in AIStor (§5).
+
+Open:
+
+- **Read-only share links** — a URL that lets someone *without an account* view one canvas.
+  Proposed: nodewright serves its own read-only view (same renderer as the editor, so style
+  extensions and cross-canvas links work), behind an unguessable, revocable token. Not via
+  `meta/canvas-viewer`: its CSP (`connect-src 'self'`) only loads files from its own origin, so it
+  cannot fetch from nodewright, and it does not understand the §3.2 extensions. canvas-viewer stays
+  the tool for loose `.canvas` files. Awaiting confirmation.
