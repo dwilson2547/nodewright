@@ -265,3 +265,45 @@ def test_mcp_lists_attachments(mcp):  # noqa: F811
     m, web = mcp
     ws = m.call("list_workspaces")["workspaces"][0]["id"]
     assert m.call("list_attachments", workspace_id=ws)["attachments"] == []
+
+
+def test_unused_attachments_are_swept(files):
+    from datetime import timedelta
+
+    from sqlalchemy import update
+
+    from nodewright.models import Attachment, CanvasRevision, utcnow
+
+    app, provider, st, sign_in = files
+    alice = sign_in(app, provider, "alice")
+    ws = alice.get("/api/workspaces").json()[0]["id"]
+    cid = alice.get(f"/api/workspaces/{ws}/canvases").json()[0]["id"]
+    up = lambda name: alice.post(f"/api/workspaces/{ws}/attachments", content=PNG,  # noqa: E731
+                                 headers={**H, "X-Filename": name}).json()
+    used, history, unused, fresh = up("used.png"), up("history.png"), up("unused.png"), up("new.png")
+    node = lambda a: {"id": a["id"][:8], "type": "file", "file": a["file"],  # noqa: E731
+                      "x": 0, "y": 0, "width": 100, "height": 100}
+
+    def save(nodes):
+        rev = alice.get(f"/api/canvases/{cid}").json()["revision"]
+        r = alice.put(f"/api/canvases/{cid}", headers=H,
+                      json={"base_revision": rev, "data": {"nodes": nodes, "edges": []}})
+        assert r.status_code == 200, r.text
+
+    save([node(used), node(history)])
+    save([node(used)])
+
+    db, now = app.state.db, utcnow()
+    with db.session() as s:
+        s.execute(update(Attachment).where(Attachment.id != fresh["id"])
+                  .values(created_at=now - timedelta(days=40)))
+    assert app.state.sweep_attachments() == 1          # only "unused"; history is recent
+    ids = {a["id"] for a in alice.get(f"/api/workspaces/{ws}/attachments").json()["attachments"]}
+    assert ids == {used["id"], history["id"], fresh["id"]}
+
+    with db.session() as s:                            # the revision ages out of the window
+        s.execute(update(CanvasRevision).values(created_at=now - timedelta(days=40)))
+    assert app.state.sweep_attachments() == 1
+    ids = {a["id"] for a in alice.get(f"/api/workspaces/{ws}/attachments").json()["attachments"]}
+    assert ids == {used["id"], fresh["id"]}
+    assert len(st.objects) == 2

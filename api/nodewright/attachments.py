@@ -8,10 +8,15 @@ everything else downloads, so an upload can never run as a page here.
 
 from __future__ import annotations
 
+import json
 import re
 import unicodedata
+from datetime import datetime, timedelta
 
-from .models import Attachment
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from .models import Attachment, Canvas, CanvasRevision, Template
 
 PREFIX = "attachments/"
 NODE_RE = re.compile(r"^attachments/([0-9a-f]{32})(?:/|$)")
@@ -64,6 +69,50 @@ def node_file(a: Attachment) -> str:
 def attachment_id(file: str) -> str | None:
     m = NODE_RE.match(file or "")
     return m.group(1) if m else None
+
+
+REF_RE = re.compile(r"attachments/([0-9a-f]{32})")
+
+
+def _refs(data) -> set[str]:
+    return set(REF_RE.findall(json.dumps(data)))
+
+
+def sweep(s: Session, now: datetime, keep_days: int) -> list[str]:
+    """Delete attachments nothing points at any more and return their object
+    keys. Kept: anything a canvas or a template uses, anything a revision from
+    the last `keep_days` uses (so undo and restoring a recent revision still
+    find their files), and anything uploaded in that window."""
+    cutoff = now - timedelta(days=keep_days)
+    old = s.scalars(select(Attachment).where(Attachment.created_at < cutoff)).all()
+    if not old:
+        return []
+    by_ws: dict[str, list[Attachment]] = {}
+    for a in old:
+        by_ws.setdefault(a.workspace_id, []).append(a)
+    used: set[str] = set()
+    for data in s.scalars(select(Template.data)):
+        used |= _refs(data)
+    keys = []
+    for ws_id, rows in by_ws.items():
+        wanted = {a.id for a in rows} - used
+        canvas_ids = s.scalars(select(Canvas.id).where(Canvas.workspace_id == ws_id)).all()
+        for data in s.scalars(select(Canvas.data).where(Canvas.workspace_id == ws_id)):
+            wanted -= _refs(data)
+        if wanted and canvas_ids:
+            recent = (select(CanvasRevision.data)
+                      .where(CanvasRevision.canvas_id.in_(canvas_ids),
+                             CanvasRevision.created_at >= cutoff)
+                      .execution_options(yield_per=50))
+            for data in s.scalars(recent):
+                wanted -= _refs(data)
+                if not wanted:
+                    break
+        for a in rows:
+            if a.id in wanted:
+                keys.append(a.key)
+                s.delete(a)
+    return keys
 
 
 def out(a: Attachment) -> dict:

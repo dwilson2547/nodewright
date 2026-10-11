@@ -34,6 +34,8 @@ attachments:
   bucket: nodewright
   secretName: nodewright-bucket-credentials
   maxBytes: 20971520
+  # Files nothing has used for this many days are deleted (design §3.3); 0 keeps them.
+  keepDays: 30
 
 # render_canvas MCP tool: a headless browser screenshots /render through
 # the in-cluster service (design §7). Shared with the scrapers, which cap it at

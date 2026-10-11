@@ -27,6 +27,8 @@ class Settings:
     attachments_dir: str | None = None
     """Local alternative to S3 (development); attachments are off with neither."""
     max_attachment_bytes: int = 20 * 1024 * 1024
+    attachment_keep_days: int = 30
+    """Unused attachments are deleted after this many days; 0 never deletes."""
     browserless_url: str | None = None
     """browserless (headless Chromium) for render_canvas, e.g.
     http://browserless.scrape-stack.svc:3000; render_canvas is off without it."""
@@ -68,6 +70,7 @@ class Settings:
             s3_region=env.get("S3_REGION") or cls.s3_region,
             attachments_dir=env.get("ATTACHMENTS_DIR") or None,
             max_attachment_bytes=int(env.get("MAX_ATTACHMENT_BYTES") or cls.max_attachment_bytes),
+            attachment_keep_days=int(env.get("ATTACHMENT_KEEP_DAYS") or cls.attachment_keep_days),
             browserless_url=env.get("BROWSERLESS_URL") or None,
             render_base_url=env.get("RENDER_BASE_URL") or None,
             dev_login=(env.get("DEV_LOGIN") or "") == "1",

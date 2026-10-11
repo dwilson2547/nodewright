@@ -65,8 +65,10 @@ preference, not stored in the canvas. Manual edge waypoints: not built.
   breaks links to it**. Link nodes (`url`) remain for external links.
 - **Attachments** are `file` nodes with `file: "attachments/<id>/<name>"`, stored in AIStor under
   `attachments/<workspace>/<id>`. Images (sniffed by magic bytes) render inline; anything else is
-  a download. Not garbage-collected when a node is deleted, since undo and revisions may still
-  point at them; deleting the workspace deletes them. Exports don't embed them yet.
+  a download. Deleting the node doesn't delete the file, since undo and revisions may still point
+  at it; a sweep (at start-up + 5 min, then every 6 h) deletes attachments that no canvas, no
+  template and no revision from the last `ATTACHMENT_KEEP_DAYS` (30) uses, once they are that
+  old (0.7.0). Deleting the workspace deletes them all. Exports don't embed them yet.
 - Not built: export a workspace as a zip of `.canvas` files + attachments; import the same.
 
 ## 4. Templates ✅ (0.4.0)

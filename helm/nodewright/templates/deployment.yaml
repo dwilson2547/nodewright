@@ -55,6 +55,8 @@ spec:
               value: {{ .bucket | quote }}
             - name: MAX_ATTACHMENT_BYTES
               value: {{ .maxBytes | int64 | quote }}
+            - name: ATTACHMENT_KEEP_DAYS
+              value: {{ .keepDays | default 30 | int | quote }}
             - name: S3_ACCESS_KEY
               valueFrom:
                 secretKeyRef:

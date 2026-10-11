@@ -37,6 +37,7 @@ CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';
 REVISION_LIST_LIMIT = 100
 CLIENT_HEADER = "x-nodewright-client"
 SSE_PING_S = 20.0
+SWEEP_FIRST, SWEEP_EVERY = 300.0, 6 * 3600.0  # attachment sweep: after start, then every
 NEXT_COOKIE = "nw_next"
 
 
@@ -109,13 +110,38 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
 
     @contextlib.asynccontextmanager
     async def lifespan(_app):
-        async with mcp.session_manager.run():
-            yield
+        sweeper = None
+        if store is not None and settings.attachment_keep_days > 0:
+            sweeper = asyncio.create_task(sweep_attachments_forever())
+        try:
+            async with mcp.session_manager.run():
+                yield
+        finally:
+            if sweeper:
+                sweeper.cancel()
+
+    def sweep_attachments() -> int:
+        with db.session() as s:
+            keys = attachments.sweep(s, utcnow(), settings.attachment_keep_days)
+        drop_objects(keys)
+        if keys:
+            log.info("attachments: deleted %d unused", len(keys))
+        return len(keys)
+
+    async def sweep_attachments_forever():
+        await asyncio.sleep(SWEEP_FIRST)
+        while True:
+            try:
+                await asyncio.to_thread(sweep_attachments)
+            except Exception:  # noqa: BLE001
+                log.exception("attachments: sweep failed")
+            await asyncio.sleep(SWEEP_EVERY)
 
     app = FastAPI(title="nodewright", version=__version__, docs_url=None, redoc_url=None,
                   openapi_url=None, lifespan=lifespan)
     app.state.settings, app.state.db, app.state.broker = settings, db, broker
     app.state.store, app.state.tickets = store, tickets
+    app.state.sweep_attachments = sweep_attachments
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
