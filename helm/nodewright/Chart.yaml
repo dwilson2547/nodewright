@@ -1,0 +1,6 @@
+apiVersion: v2
+name: nodewright
+description: Web diagram editor on JSON Canvas, signed in through authentik
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

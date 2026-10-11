@@ -321,7 +321,7 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
     if static and os.path.isdir(static):
         root = os.path.realpath(static)
 
-        @app.get("/{path:path}", include_in_schema=False)
+        @app.api_route("/{path:path}", methods=["GET", "HEAD"], include_in_schema=False)
         def ui(path: str):
             target = os.path.realpath(os.path.join(root, path))
             if path and target.startswith(root + os.sep) and os.path.isfile(target):

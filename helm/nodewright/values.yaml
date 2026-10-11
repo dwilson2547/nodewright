@@ -1,0 +1,39 @@
+image:
+  repository: dwilson2547/nodewright
+  # A release from CHANGELOG.md. Bumping this is how a release reaches the
+  # cluster; :latest is pushed too, but the chart doesn't follow it.
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+# Public (Traefik pubsecure, letsencrypt-prod, external-dns). Everything but
+# /api/health, /api/config and the sign-in routes needs an authentik session.
+ingress:
+  host: nodewright.danwils.com
+  tlsSecretName: nodewright-danwils-tls
+
+# Applied by hand; template in infra/cluster-config/example-secrets/nodewright/.
+databaseSecret: nodewright-db   # key DATABASE_URL (cluster Postgres)
+
+# authentik OIDC client (cluster-config authentik/blueprints/nodewright.yaml).
+# The redirect URI derives from ingress.host.
+oidc:
+  issuer: https://auth.danwils.com/application/o/nodewright/
+  clientId: nodewright
+  secretName: nodewright-oidc   # key client_secret
+  # The pod has no IPv6 route and auth.danwils.com resolves to Cloudflare IPv6
+  # only, so reach authentik over the LAN via traefik-public, as DanWiki does.
+  hostAliases:
+    - ip: 192.168.0.65
+      hostnames:
+        - auth.danwils.com
+
+# One replica: the schema is created at startup (create_all), and two pods
+# racing that on first boot is the one thing that could go wrong. All state is
+# in Postgres, so scaling later only needs migrations to run once.
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: "1"
+    memory: 512Mi
