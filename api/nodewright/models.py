@@ -10,7 +10,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -119,3 +119,60 @@ class CanvasRevision(Base):
     user_id: Mapped[str | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class WorkspaceMember(Base):
+    """Someone other than the owner with a role on a workspace (design §11.1).
+    The owner is `workspaces.owner_id` and has no row here. Nothing writes these
+    yet; access.authorize() already reads them, so sharing adds rows, not checks."""
+    __tablename__ = "workspace_members"
+    __table_args__ = (UniqueConstraint("workspace_id", "user_id"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    workspace_id: Mapped[str] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    role: Mapped[str] = mapped_column(String(32))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AccessToken(Base):
+    """A personal access token for MCP clients. Stored hashed like sessions;
+    `prefix` is the visible start of the token so a user can tell them apart."""
+    __tablename__ = "access_tokens"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(100))
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    prefix: Mapped[str] = mapped_column(String(16))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    user: Mapped[User] = relationship()
+
+
+class CanvasLease(Base):
+    """Who may write a canvas right now (design §11.3). Expiry, not release, is
+    the safety net: a crashed agent's lease just lapses."""
+    __tablename__ = "canvas_leases"
+
+    canvas_id: Mapped[str] = mapped_column(
+        ForeignKey("canvases.id", ondelete="CASCADE"), primary_key=True)
+    holder: Mapped[str] = mapped_column(String(128))
+    """kind:user_id:client — one browser tab or one access token."""
+    kind: Mapped[str] = mapped_column(String(8))
+    """ui | agent"""
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    label: Mapped[str] = mapped_column(String(160))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class StyleGuide(Base):
+    """A user's "how I like my diagrams" notes, handed to agents (design §11.4)."""
+    __tablename__ = "style_guides"
+
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    text: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

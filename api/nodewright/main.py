@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -9,15 +11,17 @@ import re
 from datetime import datetime
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
+from starlette.routing import Route
 
-from . import __version__, auth, canvas_format, oidc
+from . import (__version__, access, auth, canvas_format, events, leases, mcp_server, oidc,
+               styleguide, tokens)
 from .config import Settings
 from .db import Database
-from .models import Canvas, CanvasRevision, User, Workspace, utcnow
+from .models import AccessToken, Canvas, CanvasRevision, StyleGuide, User, Workspace, utcnow
 
 log = logging.getLogger("nodewright")
 
@@ -25,6 +29,8 @@ CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';
        "img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; "
        "base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 REVISION_LIST_LIMIT = 100
+CLIENT_HEADER = "x-nodewright-client"
+SSE_PING_S = 20.0
 
 
 class NameIn(BaseModel):
@@ -34,6 +40,10 @@ class NameIn(BaseModel):
 class CanvasCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     data: dict | None = None
+
+
+class StyleGuideIn(BaseModel):
+    text: str = Field(max_length=styleguide.MAX_CHARS)
 
 
 class CanvasPatch(BaseModel):
@@ -60,16 +70,24 @@ def _filename(name: str) -> str:
 
 def create_app(settings: Settings | None = None, provider: oidc.Provider | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
-    db = Database(settings.database_url)
+    broker = events.Broker()
+    db = Database(settings.database_url, broker)
     db.create_schema()
     if provider is None and settings.oidc_enabled:
         provider = oidc.Provider(settings)
     if settings.dev_login and not settings.dev_login_enabled:
         log.warning("DEV_LOGIN ignored: PUBLIC_URL is https")
 
+    mcp, mcp_app = mcp_server.build(db, settings)
+
+    @contextlib.asynccontextmanager
+    async def lifespan(_app):
+        async with mcp.session_manager.run():
+            yield
+
     app = FastAPI(title="nodewright", version=__version__, docs_url=None, redoc_url=None,
-                  openapi_url=None)
-    app.state.settings, app.state.db = settings, db
+                  openapi_url=None, lifespan=lifespan)
+    app.state.settings, app.state.db, app.state.broker = settings, db, broker
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
@@ -88,18 +106,26 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
     def user_dep(request: Request, s: Session = Depends(session)) -> User:
         return auth.require_user(s, request, settings)
 
-    def own_workspace(s: Session, user: User, ws_id: str) -> Workspace:
-        ws = s.get(Workspace, ws_id)
-        # Someone else's id answers exactly like a missing one.
-        if ws is None or ws.owner_id != user.id:
-            raise HTTPException(404, "workspace not found")
-        return ws
+    def workspace_for(s: Session, user: User, ws_id: str,
+                      action: str = access.READ) -> Workspace:
+        try:
+            return access.workspace(s, user, ws_id, action)
+        except access.Denied as exc:
+            raise access.http(exc) from None
 
-    def own_canvas(s: Session, user: User, canvas_id: str) -> Canvas:
-        c = s.get(Canvas, canvas_id)
-        if c is None or c.workspace.owner_id != user.id:
-            raise HTTPException(404, "canvas not found")
-        return c
+    def canvas_for(s: Session, user: User, canvas_id: str, action: str = access.READ) -> Canvas:
+        try:
+            return access.canvas(s, user, canvas_id, action)
+        except access.Denied as exc:
+            raise access.http(exc) from None
+
+    def ui_holder(request: Request, user: User) -> leases.Holder:
+        client = re.sub(r"[^A-Za-z0-9_-]", "", request.headers.get(CLIENT_HEADER, ""))[:40]
+        return leases.Holder("ui", user, client or "browser", user.username)
+
+    def locked(exc: leases.Locked) -> JSONResponse:
+        return JSONResponse(status_code=423, content={
+            "detail": str(exc), "lease": leases.describe(exc.lease)})
 
     async def json_body(request: Request) -> dict:
         declared = request.headers.get("content-length")
@@ -193,9 +219,7 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
 
     @app.get("/api/workspaces")
     def list_workspaces(user: User = Depends(user_dep), s: Session = Depends(session)):
-        rows = s.scalars(select(Workspace).where(Workspace.owner_id == user.id)
-                         .order_by(Workspace.created_at))
-        return [_ws_out(w) for w in rows]
+        return [_ws_out(w) for w in access.visible_workspaces(s, user)]
 
     @app.post("/api/workspaces", status_code=201)
     def create_workspace(body: NameIn, user: User = Depends(user_dep),
@@ -210,26 +234,26 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
     @app.patch("/api/workspaces/{ws_id}")
     def rename_workspace(ws_id: str, body: NameIn, user: User = Depends(user_dep),
                          s: Session = Depends(session)):
-        ws = own_workspace(s, user, ws_id)
+        ws = workspace_for(s, user, ws_id, access.MANAGE)
         ws.name, ws.updated_at = body.name.strip(), utcnow()
         return _ws_out(ws)
 
     @app.delete("/api/workspaces/{ws_id}", status_code=204)
     def delete_workspace(ws_id: str, user: User = Depends(user_dep),
                          s: Session = Depends(session)):
-        s.delete(own_workspace(s, user, ws_id))
+        s.delete(workspace_for(s, user, ws_id, access.MANAGE))
         return Response(status_code=204)
 
     # --- canvases (tabs) ----------------------------------------------------
 
     @app.get("/api/workspaces/{ws_id}/canvases")
     def list_canvases(ws_id: str, user: User = Depends(user_dep), s: Session = Depends(session)):
-        return [_canvas_meta(c) for c in own_workspace(s, user, ws_id).canvases]
+        return [_canvas_meta(c) for c in workspace_for(s, user, ws_id).canvases]
 
     @app.post("/api/workspaces/{ws_id}/canvases", status_code=201)
     def create_canvas(ws_id: str, body: CanvasCreate, user: User = Depends(user_dep),
                       s: Session = Depends(session)):
-        ws = own_workspace(s, user, ws_id)
+        ws = workspace_for(s, user, ws_id, access.CANVAS_CREATE)
         data = checked(body.data) if body.data is not None else canvas_format.empty()
         if len(json.dumps(data)) > settings.max_canvas_bytes:
             raise HTTPException(413, "canvas is too large")
@@ -245,8 +269,10 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
 
     @app.get("/api/canvases/{canvas_id}")
     def get_canvas(canvas_id: str, user: User = Depends(user_dep), s: Session = Depends(session)):
-        c = own_canvas(s, user, canvas_id)
-        return {**_canvas_meta(c), "data": c.data}
+        c = canvas_for(s, user, canvas_id)
+        return {**_canvas_meta(c), "data": c.data,
+                "lease": leases.describe(leases.active(s, c.id)),
+                "can_edit": access.can(s, user, c.workspace, access.CANVAS_EDIT)}
 
     @app.put("/api/canvases/{canvas_id}")
     async def save_canvas(canvas_id: str, request: Request, user: User = Depends(user_dep),
@@ -255,7 +281,12 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
         if not isinstance(body, dict) or not isinstance(body.get("base_revision"), int):
             raise HTTPException(400, "expected {base_revision, data}")
         data = checked(body.get("data"))
-        c = own_canvas(s, user, canvas_id)
+        c = canvas_for(s, user, canvas_id, access.CANVAS_EDIT)
+        who = ui_holder(request, user)
+        try:
+            leases.take(s, c.id, who)
+        except leases.Locked as exc:
+            return locked(exc)
         base = body["base_revision"]
         # Compare-and-swap in one statement: of two concurrent saves from the same
         # base, exactly one matches the WHERE and the other gets the 409.
@@ -272,12 +303,14 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
         s.add(CanvasRevision(canvas_id=c.id, revision=base + 1, data=data, user_id=user.id,
                              source="ui"))
         c.workspace.updated_at = now
+        events.queue(s, c.id, {"type": "revision", "revision": base + 1, "source": "ui",
+                               "by": user.username, "client": who.key})
         return {"id": c.id, "revision": base + 1, "updated_at": _iso(now)}
 
     @app.patch("/api/canvases/{canvas_id}")
     def patch_canvas(canvas_id: str, body: CanvasPatch, user: User = Depends(user_dep),
                      s: Session = Depends(session)):
-        c = own_canvas(s, user, canvas_id)
+        c = canvas_for(s, user, canvas_id, access.CANVAS_EDIT)
         if body.name is not None:
             c.name = body.name.strip()
         if body.position is not None:
@@ -290,13 +323,13 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
     @app.delete("/api/canvases/{canvas_id}", status_code=204)
     def delete_canvas(canvas_id: str, user: User = Depends(user_dep),
                       s: Session = Depends(session)):
-        s.delete(own_canvas(s, user, canvas_id))
+        s.delete(canvas_for(s, user, canvas_id, access.CANVAS_DELETE))
         return Response(status_code=204)
 
     @app.get("/api/canvases/{canvas_id}/revisions")
     def list_revisions(canvas_id: str, user: User = Depends(user_dep),
                        s: Session = Depends(session)):
-        c = own_canvas(s, user, canvas_id)
+        c = canvas_for(s, user, canvas_id)
         rows = s.execute(select(CanvasRevision.revision, CanvasRevision.source,
                                 CanvasRevision.created_at)
                          .where(CanvasRevision.canvas_id == c.id)
@@ -306,10 +339,112 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
     @app.get("/api/canvases/{canvas_id}/export")
     def export_canvas(canvas_id: str, user: User = Depends(user_dep),
                       s: Session = Depends(session)):
-        c = own_canvas(s, user, canvas_id)
+        c = canvas_for(s, user, canvas_id)
         return Response(json.dumps(c.data, indent="\t"), media_type="application/json",
                         headers={"Content-Disposition":
                                  f'attachment; filename="{_filename(c.name)}"'})
+
+    # --- edit lease ----------------------------------------------------------
+
+    @app.get("/api/canvases/{canvas_id}/lease")
+    def get_lease(canvas_id: str, user: User = Depends(user_dep), s: Session = Depends(session)):
+        c = canvas_for(s, user, canvas_id)
+        return {"lease": leases.describe(leases.active(s, c.id))}
+
+    @app.post("/api/canvases/{canvas_id}/lease")
+    def take_lease(canvas_id: str, request: Request, force: bool = False,
+                   user: User = Depends(user_dep), s: Session = Depends(session)):
+        """Take (or with force=true, take over) the edit lease for this tab."""
+        c = canvas_for(s, user, canvas_id, access.LEASE_BREAK if force else access.CANVAS_EDIT)
+        try:
+            row = leases.take(s, c.id, ui_holder(request, user), force=force)
+        except leases.Locked as exc:
+            return locked(exc)
+        return {"lease": leases.describe(row)}
+
+    @app.delete("/api/canvases/{canvas_id}/lease")
+    def drop_lease(canvas_id: str, request: Request, user: User = Depends(user_dep),
+                   s: Session = Depends(session)):
+        c = canvas_for(s, user, canvas_id)
+        return {"released": leases.release(s, c.id, ui_holder(request, user))}
+
+    # --- live updates --------------------------------------------------------
+
+    @app.get("/api/canvases/{canvas_id}/events")
+    async def canvas_events(canvas_id: str, request: Request):
+        with db.session() as s:
+            user = auth.require_user(s, request, settings)
+            c = canvas_for(s, user, canvas_id)
+            lease = leases.describe(leases.active(s, c.id))
+            revision = c.revision
+        q = broker.subscribe(canvas_id)
+
+        async def stream():
+            try:
+                hello = {"type": "hello", "revision": revision, "lease": lease}
+                yield f"data: {json.dumps(hello)}\n\n"
+                while True:
+                    try:
+                        ev = await asyncio.wait_for(q.get(), SSE_PING_S)
+                    except asyncio.TimeoutError:
+                        if await request.is_disconnected():
+                            return
+                        yield ": ping\n\n"
+                        continue
+                    yield f"data: {json.dumps(ev)}\n\n"
+            finally:
+                broker.unsubscribe(canvas_id, q)
+
+        return StreamingResponse(stream(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-store",
+                                          "X-Accel-Buffering": "no"})
+
+    # --- access tokens and style guide (cookie session only) -----------------
+
+    @app.get("/api/tokens")
+    def list_tokens(user: User = Depends(user_dep), s: Session = Depends(session)):
+        rows = s.scalars(select(AccessToken).where(AccessToken.user_id == user.id)
+                         .order_by(AccessToken.created_at))
+        return [tokens.out(r) for r in rows]
+
+    @app.post("/api/tokens", status_code=201)
+    def create_token(body: NameIn, user: User = Depends(user_dep), s: Session = Depends(session)):
+        if tokens.count(s, user) >= tokens.MAX_PER_USER:
+            raise HTTPException(409, f"at most {tokens.MAX_PER_USER} tokens; revoke one first")
+        row, raw = tokens.create(s, user, body.name)
+        return {**tokens.out(row), "token": raw,
+                "mcp_url": settings.public_url.rstrip("/") + "/mcp"}
+
+    @app.delete("/api/tokens/{token_id}", status_code=204)
+    def revoke_token(token_id: str, user: User = Depends(user_dep),
+                     s: Session = Depends(session)):
+        row = s.get(AccessToken, token_id)
+        if row is None or row.user_id != user.id:
+            raise HTTPException(404, "token not found")
+        s.delete(row)
+        return Response(status_code=204)
+
+    @app.get("/api/style-guide")
+    def get_style_guide(user: User = Depends(user_dep), s: Session = Depends(session)):
+        text, default = styleguide.get(s, user)
+        return {"text": text, "is_default": default}
+
+    @app.put("/api/style-guide")
+    def put_style_guide(body: StyleGuideIn, user: User = Depends(user_dep),
+                        s: Session = Depends(session)):
+        row = s.get(StyleGuide, user.id)
+        if not body.text.strip():
+            if row is not None:
+                s.delete(row)
+            return {"text": styleguide.DEFAULT, "is_default": True}
+        if row is None:
+            s.add(StyleGuide(user_id=user.id, text=body.text))
+        else:
+            row.text, row.updated_at = body.text, utcnow()
+        return {"text": body.text, "is_default": False}
+
+    # MCP endpoint (bearer tokens, not cookies); must come before the catch-alls.
+    app.router.routes.append(Route("/mcp", endpoint=mcp_app, methods=["GET", "POST", "DELETE"]))
 
     @app.api_route("/api/{rest:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
     def api_not_found(rest: str):
