@@ -122,7 +122,7 @@ authorization server via protected-resource metadata and expect to register them
 supports either; and the exact current MCP auth spec revision — re-read it before implementing.
 
 Plan, in order:
-1. **Personal access tokens** (v1): created in the nodewright UI, scoped to the user, sent as
+1. ✅ (0.2.0) **Personal access tokens** (v1): created in the nodewright UI, scoped to the user, sent as
    `Authorization: Bearer`. Works with any MCP client that accepts static headers.
 2. **Full MCP OAuth** (later): nodewright acts as the authorization server for MCP clients
    (handles registration, issues its own tokens) and delegates the actual login to authentik — the
@@ -133,16 +133,26 @@ Plan, in order:
 Streamable-HTTP endpoint on the API (same process, same auth). Tools operate at the semantic level
 so an agent never has to invent pixel coordinates:
 
+Built in 0.2.0 (✅ verified with the MCP Python SDK client against a local server):
+
 | Tool | Purpose |
 |---|---|
-| `list_workspaces`, `list_canvases` | Discovery |
-| `get_canvas` | Full JSON Canvas + revision |
-| `create_canvas` | New tab, optionally from a page template |
-| `add_nodes`, `add_edges` | Batch add; positions optional |
-| `update_elements`, `delete_elements` | Batch edit by id |
-| `layout` | Auto-place nodes (all or a subset) with ELK/dagre |
-| `apply_template` | Insert a template at a position or near a node |
-| `link_canvases` | Add a file node pointing at another canvas |
+| `list_workspaces` | Discovery: workspaces with their canvases |
+| `create_workspace`, `create_canvas` | New workspace / tab (returns a `/?canvas=` link) |
+| `get_canvas` | Full JSON Canvas + revision + current lock |
+| `add_elements` | Nodes and edges in one call; agent-chosen ids; `group` to nest; positions optional |
+| `update_elements`, `delete_elements` | Batch edit by id (`null` removes a key; `fit` resizes to text) |
+| `layout` | Re-place all or some nodes; groups move with their contents and refit |
+| `lock_canvas`, `unlock_canvas` | Explicit lease for long builds (§11.3) |
+| `get_style_guide` | The user's style guide (§11.4) |
+
+Still planned: `apply_template` (§4), `link_canvases` (§3.3).
+
+Layout is our own (`api/nodewright/layout.py`), not ELK/dagre: a layered layout (cycle breaking,
+longest-path layers, barycentre ordering, least-squares packing) with groups as compound nodes,
+snapped to a 20 px grid. Unpositioned new nodes are laid out as one block and anchored below/right
+of the existing nodes they connect to. Known limit: edges are not routed, so an edge can cross a
+node that sits between its ends.
 
 Key rule: nodes added without coordinates are placed by the layout engine. Every tool call is one
 revision, so a bad agent edit is one undo away.
@@ -154,7 +164,7 @@ of editor polish.
 
 1. ✅ Skeleton: API + Postgres, authentik login, workspaces/tabs, load/save, snap-to-grid, basic edge
    styling, import/export.
-2. **Agents:** personal access tokens, the §7 tool set, layout engine, live push to open tabs (SSE),
+2. ✅ (0.2.0) **Agents:** personal access tokens, the §7 tool set, layout engine, live push to open tabs (SSE),
    edit leases (§11.3), style guides (§11.4).
 3. **Editor:** shapes and edge line styles (§3.2), templates and default pages (§4), folders (§11.2),
    attachments (AIStor).
@@ -178,10 +188,12 @@ Resolved 2026-10-10 (✅ user):
 
 ## 10. Status
 
-Phase 1 ✅ deployed 2026-10-11 as 0.1.0 (see `CHANGELOG.md`). Beyond the phase-1 line it already has
-snap-to-grid (10/20/40 px), edge colour/arrow ends/labels, undo/redo and `.canvas` import/export.
-Not yet: shapes and edge line styles (§3.2), templates (§4), share links, MCP, attachments, Alembic
-(schema is `create_all` at startup, so the first schema change needs migrations set up).
+Phase 1 ✅ deployed 2026-10-11 as 0.1.0; phase 2 ✅ as 0.2.0 (see `CHANGELOG.md`): MCP server,
+access tokens, auto-layout, edit leases, SSE live updates, style guides, and `authorize()` with a
+members table (no sharing UI). Not yet: shapes and edge line styles (§3.2), templates (§4), folders,
+share links, attachments, Alembic (schema is `create_all` at startup, which only adds tables; the
+first change to an existing table needs migrations set up). Live updates are in-process, so the
+chart must stay at one replica until `events.py` moves to Postgres LISTEN/NOTIFY.
 
 ## 11. Future: collaboration and community 📐
 
@@ -228,11 +240,21 @@ work by colliding in the first place.
   The owner or an editor can break a lease.
 - **Expiry, not explicit release, is the safety net:** a crashed agent's lease simply lapses.
 
+As built (0.2.0): `canvas_leases(canvas_id PK, holder, kind, user_id, label, expires_at)`, holder =
+`kind:user:client` (a browser tab id or an access-token id). Each browser save takes/renews a 30 s
+lease (no heartbeat); each agent write 2 min; `lock_canvas` 1–15 min. Leaving a tab releases it.
+Conflicts are HTTP 423 for the browser and a tool error for agents. Breaking a lease needs the
+`lease.break` permission (owner, editor).
+
 ### 11.4 Agent style guides
 
 A per-user (later per-org) markdown "how I like my diagrams" document plus structured defaults
 (direction, spacing, colours per node kind, preferred templates). Exposed to agents as an MCP
 resource/prompt and returned by `get_canvas`, so agents follow it without being told each time.
+
+As built (0.2.0): free-text markdown only, per user, via the `get_style_guide` tool (the server
+instructions tell agents to call it first) and edited in the Agents dialog; a built-in default is
+returned until the user saves one. Structured defaults and per-org guides are not built.
 A style guide is also the unit the marketplace shares (§11.5).
 
 ### 11.5 Marketplace (stretch)

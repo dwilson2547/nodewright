@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.2.0 - 2026-10-11
+
+### Added
+- Phase 2 "Agents": MCP server at `/mcp` (streamable HTTP, stateless) with `list_workspaces`,
+  `create_workspace`, `create_canvas`, `get_canvas`, `add_elements`, `update_elements`,
+  `delete_elements`, `layout`, `lock_canvas`, `unlock_canvas`, `get_style_guide`.
+- Server-side layered auto-layout with groups as compound nodes; nodes without coordinates are
+  placed next to what they connect to and sized to their text.
+- Personal access tokens (Agents dialog; shown once; hashed at rest; MCP only, not a REST credential).
+- Edit leases: every write takes a short per-canvas lease (browser tab 30 s, agent 2 min,
+  `lock_canvas` up to 15 min). Other holders get 423 / a "locked" tool error; the browser goes
+  view-only with a banner and "Take over".
+- Live updates: open tabs follow other writers over SSE (`/api/canvases/{id}/events`).
+- Per-user agent style guide with a built-in default.
+- `authorize()` as the single permission check, with a `workspace_members` table and
+  owner/editor/viewer roles (no sharing UI yet).
+- `/?canvas=<id>` deep links.
+
+### Fixed
+- Group nodes drew a second border (React Flow's built-in `group` styling).
+- uvicorn graceful shutdown capped at 5 s so open event streams can't stall a rollout.
+
 ## 0.1.0 - 2026-10-11
 
 ### Added
