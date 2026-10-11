@@ -17,7 +17,7 @@ from typing import Callable
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 
-from . import access, canvas_format, events, leases, layout, styles
+from . import access, canvas_format, events, leases, layout, ports, styles
 from .layout import GRID, GROUP_PAD, NODE_GAP, RANK_GAP, snap
 from .models import Canvas, CanvasRevision, User, utcnow
 
@@ -211,6 +211,11 @@ def _clean_node(raw: dict, ids: set[str]) -> dict:
     if n["type"] == "text":
         n.setdefault("text", "")
     _clean_style(n, styles.NODE, "node")
+    if "ports" in n:
+        try:
+            n["ports"] = ports.check(n["ports"], "node")
+        except ValueError as exc:
+            raise OpError(str(exc)) from None
     if "id" in n:
         if not isinstance(n["id"], str) or not n["id"] or n["id"] in ids:
             raise OpError(f"node id {n.get('id')!r} is empty or already used")
@@ -228,6 +233,10 @@ def _clean_edge(raw: dict, ids: set[str]) -> dict:
         if k not in e:
             raise OpError(f"edge needs {k}")
     _clean_style(e, styles.EDGE, "edge")
+    try:
+        ports.check_edge(e, "edge")
+    except ValueError as exc:
+        raise OpError(str(exc)) from None
     if "id" in e:
         if not isinstance(e["id"], str) or not e["id"] or e["id"] in ids:
             raise OpError(f"edge id {e.get('id')!r} is empty or already used")
@@ -235,6 +244,18 @@ def _clean_edge(raw: dict, ids: set[str]) -> dict:
         e["id"] = new_id()
     ids.add(e["id"])
     return e
+
+
+def _ports(data: dict, checked: list[dict]) -> None:
+    """Agent-written edges must name ports that exist; then every edge's side
+    follows its port (ports.sync), including edges whose node's ports moved."""
+    nodes = {n["id"]: n for n in data["nodes"]}
+    for e in checked:
+        try:
+            ports.require(e, nodes)
+        except ValueError as exc:
+            raise OpError(str(exc)) from None
+    ports.sync(data)
 
 
 def add_elements(nodes: list[dict], edges: list[dict], direction: str = "TB"):
@@ -315,6 +336,7 @@ def add_elements(nodes: list[dict], edges: list[dict], direction: str = "TB"):
         others = [n for n in new if n["type"] != "group"]
         data["nodes"] = new_groups + existing + others
         data["edges"] = data["edges"] + new_edges
+        _ports(data, new_edges)
         return {"node_ids": [n["id"] for n in new], "edge_ids": [e["id"] for e in new_edges],
                 **geometry(data, [n["id"] for n in new])}
 
@@ -363,7 +385,7 @@ def update_elements(updates: list[dict]):
 
     def op(data: dict) -> dict:
         index = {n["id"]: n for n in data["nodes"]} | {e["id"]: e for e in data["edges"]}
-        changed = []
+        changed, repointed = [], []
         for u in updates:
             if not isinstance(u, dict) or not isinstance(u.get("set"), dict):
                 raise OpError("each update is {id, set: {key: value or null}}")
@@ -386,6 +408,13 @@ def update_elements(updates: list[dict]):
                     if not target[k]:
                         del target[k]
                     continue
+                if k in ("fromPort", "toPort") and v is not None:
+                    repointed.append(target)
+                if k == "ports" and v is not None:
+                    try:
+                        v = ports.check(v, "node")
+                    except ValueError as exc:
+                        raise OpError(str(exc)) from None
                 if v is None:
                     target.pop(k, None)
                 else:
@@ -393,6 +422,9 @@ def update_elements(updates: list[dict]):
             if u.get("fit") and "type" in target and target["type"] != "group":
                 target["width"], target["height"] = auto_size(target)
             changed.append(target["id"])
+        # Only ports named in this update are checked: an edge already on a
+        # removed port can still have its label or colour changed.
+        _ports(data, repointed)
         return {"updated": changed}
 
     return op

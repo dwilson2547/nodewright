@@ -224,8 +224,8 @@ of editor polish.
    approved the migration).
 4. **Sharing:** ✅ (0.7.0) read-only share links (§9) and folders (§11.2); ✅ (0.8.0) workspace
    members (§11.1). Organisations with built-in roles come last in the order below.
-5. **Next, in order** (✅ user, 2026-10-11): ✅ workspace zip export (0.9.0) → ✅ edge corner radius (0.10.0) → custom
-   icons and node ports → schema nodes (§12) and schematics → manual edge waypoints →
+5. **Next, in order** (✅ user, 2026-10-11): ✅ workspace zip export (0.9.0) → ✅ edge corner radius (0.10.0) →
+   ✅ node ports (0.11.0) → custom icons, built-in set and icon creator (§13) → schema nodes (§12) and schematics → manual edge waypoints →
    organisations and roles.
 6. **Stretch:** marketplace (§11.5), custom roles.
 
@@ -258,7 +258,7 @@ phase as 0.4.0 (see `CHANGELOG.md`): MCP server, access tokens, auto-layout, edi
 updates, style guides, shapes and line styles, templates, tab links, attachments, and
 `authorize()` with a members table (no sharing UI). 0.7.0 added folders, read-only share links,
 Alembic migrations, CI and the unused-attachment sweep. 0.8.0 added workspace members, 0.9.0 workspace zip
-export, 0.10.0 edge corner radius. Not yet: organisations, zip import. Live updates are in-process, so the chart must stay at
+export, 0.10.0 edge corner radius, 0.11.0 node ports. Not yet: organisations, zip import. Live updates are in-process, so the chart must stay at
 one replica until `events.py` moves to Postgres LISTEN/NOTIFY.
 
 ## 11. Future: collaboration and community 📐
@@ -367,13 +367,21 @@ Not designed yet. Constraints already known:
 - Field-level edges (an edge to one field of a message) need node ports, which come first in the
   §8 order and are shared with schematics.
 
-## 13. Node ports and custom icons — proposal 📐
+## 13. Node ports and custom icons 📐
 
-Proposed 2026-10-11, not yet agreed. User direction (✅ user): connection points are attributes
+Proposed 2026-10-11 and agreed the same day (✅ user): ports before icons; SVG uploads checked
+against an element/attribute allowlist; a built-in icon set; and an icon creator for basic shapes,
+wanted for schematics. User direction (✅ user): connection points are attributes
 with locations, and the user sets their number and placement in the editor; uploaded SVGs are
 scanned before import to verify they carry no script.
 
-### 13.1 Ports
+### 13.1 Ports ✅ (0.11.0, `ports.py`, `ui/src/ports.ts`, `PortsPanel.tsx`)
+
+Built as below, except: ports are edited from a **Ports** panel (toolbar button on one selected
+node) with presets and per-port id, label, side and a position slider, not by dragging handles
+along the side yet. Renaming a port in the panel carries its lines along. Port labels are drawn
+inside the node and can overlap its text. Agent writes must name existing ports; canvas saves
+from the editor may name missing ones (dangling).
 
 - **Node:** an extension key `ports`, an array of `{id, side, at, label?}`. `side` is
   top/right/bottom/left; `at` is the fraction along that side (0 = top/left end, 1 = bottom/right
@@ -417,12 +425,13 @@ scanned before import to verify they carry no script.
   Zip export (§3.3) adds `icons/<id>/<name>.svg`.
 - **Icons carry default ports**, so a dropped symbol arrives with its pins (a resistor with two).
   This is what schematics are built from.
-- **Designer later:** first an SVG source editor with live preview and the same validator, then
-  drawing tools if they're still wanted.
+- **Icon creator** (✅ user): compose an icon from basic shapes (rect, ellipse, line, polyline,
+  arc, text) on a grid, with pins placed as default ports. It writes allowlisted SVG, so it goes
+  through the same validator. A raw SVG source view can come with it.
 
 ### 13.3 Proposed order
 
 1. Ports (format, rendering, editor, MCP). No migration. Unblocks schemas.
 2. Icons: upload validation, library + migration, built-in set, icon on text nodes, zip export.
 3. Default ports on icons, then schema nodes (§12) with derived field ports.
-4. The icon designer.
+4. The icon creator.

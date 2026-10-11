@@ -220,12 +220,17 @@ def build(db: Database, settings: Settings, store: storage.Store | None = None,
                                      "group (`label`). Optional: "
                                      "id, color ('1'-'6' or '#rrggbb'), group (id of a group "
                                      "node to put it in), x/y/width/height (omit to auto-place "
-                                     "and auto-size). " + NODE_STYLE)] = [],  # noqa: B006
+                                     "and auto-size), ports ([{id, side: top|right|bottom|left, "
+                                     "at: 0-1 along that side from its top/left end, label?}]: "
+                                     "named connection points that replace the four side "
+                                     "handles). " + NODE_STYLE)] = [],  # noqa: B006
                      edges: Annotated[list[dict], Field(
                          description="Edges to add: fromNode, toNode (ids, existing or from "
                                      "`nodes`). Optional: id, label, color, fromEnd/toEnd "
                                      "('none'|'arrow', default toEnd arrow), fromSide/toSide "
-                                     "(top|right|bottom|left; omit to let the editor choose). "
+                                     "(top|right|bottom|left; omit to let the editor choose), "
+                                     "fromPort/toPort (a port id on that node; the side then "
+                                     "follows the port). "
                                      + EDGE_STYLE)
                      ] = [],  # noqa: B006
                      direction: Direction = "TB") -> dict:
@@ -248,7 +253,9 @@ def build(db: Database, settings: Settings, store: storage.Store | None = None,
                                         "only the shape, {styleAttributes: {path: null}} resets "
                                         "one attribute.")]) -> dict:
         """Change existing nodes or edges: text, colour, label, geometry, ends, sides,
-        styleAttributes (see add_elements for the values)."""
+        ports, fromPort/toPort, styleAttributes (see add_elements for the values).
+        Setting a node's ports replaces the whole list; edges on a port that no
+        longer exists keep their side."""
         return write(ctx, canvas_id, ops.update_elements(updates))
 
     @server.tool()

@@ -8,6 +8,8 @@ live (design §3.2), and dropping them would lose data on every save.
 
 from __future__ import annotations
 
+from . import ports
+
 NODE_TYPES = {"text", "file", "link", "group"}
 SIDES = {"top", "right", "bottom", "left"}
 ENDS = {"none", "arrow"}
@@ -86,6 +88,11 @@ def validate(doc) -> dict:
             raise CanvasError(f"{where} must have a positive size")
         _str(node, "color", where)
         _style(node, where)
+        if "ports" in node:
+            try:
+                n["ports"] = ports.check(node["ports"], where)
+            except ValueError as exc:
+                raise CanvasError(str(exc)) from None
         if node["type"] == "text":
             _str(node, "text", where, required=True)
         elif node["type"] == "file":
@@ -121,6 +128,10 @@ def validate(doc) -> dict:
         _str(edge, "color", where)
         _str(edge, "label", where)
         _style(edge, where)
+        try:
+            ports.check_edge(edge, where)
+        except ValueError as exc:
+            raise CanvasError(str(exc)) from None
 
     out["nodes"] = out_nodes
     out["edges"] = list(edges)

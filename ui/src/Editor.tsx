@@ -27,8 +27,11 @@ import {
 } from "@xyflow/react";
 import { api, ApiError, CLIENT_ID, isMine, releaseOnUnload, type CanvasEvent, type JsonCanvas, type Lease, type Template } from "./api";
 import { DRAG_TYPE, Palette } from "./Palette";
+import { endFields, portsOf, type Port } from "./ports";
+import { PortsPanel } from "./PortsPanel";
 import {
   PRESETS,
+  edgeEnds,
   edgeVisual,
   newId,
   toCanvas,
@@ -119,6 +122,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
   const [notice, setNotice] = useState<string | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(() => localStorage.getItem("nw.palette") !== "0");
   const [tplReload, setTplReload] = useState(0);
+  const [portsOpen, setPortsOpen] = useState(false);
   const otherLease = lease && !isMine(lease) ? lease : null;
   const readOnly = !canEdit || !!otherLease;
   const flow = useReactFlow<CNode, CEdge>();
@@ -587,24 +591,59 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
       if (e.id !== id) return e;
       const raw = { ...e.data!.raw, ...patch };
       for (const k of Object.keys(patch)) if (patch[k] === undefined) delete raw[k];
-      return { ...e, data: { raw }, ...edgeVisual(raw) };
+      return { ...e, data: { ...e.data, raw }, ...edgeVisual(raw) };
     }));
   }, [setEdges]);
 
+  // An end's fields for a connection: fromSide/toSide, plus fromPort/toPort
+  // when it was made to a port (ports.ts). Unset fields are removed.
+  const ends = useCallback((c: Connection, base: Record<string, any>) => {
+    const raw: Record<string, any> = {
+      ...base, fromNode: c.source, toNode: c.target,
+      ...endFields(flow.getNode(c.source)?.data.raw, c.sourceHandle, "from"),
+      ...endFields(flow.getNode(c.target)?.data.raw, c.targetHandle, "to"),
+    };
+    for (const k of Object.keys(raw)) if (raw[k] === undefined) delete raw[k];
+    return raw;
+  }, [flow]);
+
   const onConnect = useCallback((c: Connection) => {
-    const raw = { id: newId(), fromNode: c.source, fromSide: c.sourceHandle, toNode: c.target, toSide: c.targetHandle };
+    const raw = ends(c, { id: newId() });
     setEdges((es) => addEdge({ ...c, id: raw.id, data: { raw }, ...edgeVisual(raw) }, es));
-  }, [setEdges]);
+  }, [setEdges, ends]);
 
   const onReconnect = useCallback((old: Edge, c: Connection) => {
     setEdges((es) => {
       const next = reconnectEdge(old, c, es as Edge[]) as CEdge[];
       return next.map((e) => e.id !== old.id ? e : {
         ...e,
-        data: { raw: { ...(old as CEdge).data!.raw, fromNode: c.source, fromSide: c.sourceHandle, toNode: c.target, toSide: c.targetHandle } },
+        data: { raw: ends(c, (old as CEdge).data!.raw) },
       });
     });
-  }, [setEdges]);
+  }, [setEdges, ends]);
+
+  // Replace a node's ports; its lines follow a renamed port, take a moved
+  // port's side, and fall back to their side (flagged) when theirs is gone.
+  const setPorts = useCallback((nodeId: string, ports: Port[], renamed?: [string, string]) => {
+    const node = flow.getNode(nodeId) as CNode | undefined;
+    if (!node) return;
+    const raw: Record<string, any> = { ...node.data.raw, ports };
+    if (!ports.length) delete raw.ports;
+    setNodes((ns) => ns.map((n) => (n.id === nodeId ? { ...n, data: { raw } } : n)));
+    setEdges((es) => es.map((e) => {
+      if (e.source !== nodeId && e.target !== nodeId) return e;
+      const er = { ...e.data!.raw };
+      for (const [nk, pk, sk] of [["fromNode", "fromPort", "fromSide"], ["toNode", "toPort", "toSide"]]) {
+        if (er[nk] !== nodeId || typeof er[pk] !== "string") continue;
+        if (renamed && er[pk] === renamed[0]) er[pk] = renamed[1];
+        const p = ports.find((x) => x.id === er[pk]);
+        if (p) er[sk] = p.side;
+      }
+      const from = er.fromNode === nodeId ? raw : flow.getNode(er.fromNode)?.data.raw;
+      const to = er.toNode === nodeId ? raw : flow.getNode(er.toNode)?.data.raw;
+      return { ...e, ...edgeEnds(er, from as Record<string, any>, to as Record<string, any>) };
+    }));
+  }, [flow, setNodes, setEdges]);
 
   // JSON Canvas groups don't own their nodes; like Obsidian, dragging a group
   // carries whatever lies inside it when the drag starts.
@@ -680,7 +719,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
     setEdges((es) => es.map((e) => {
       if (!ids.has(e.id)) return e;
       const raw = withAttr(e.data!.raw, key, value);
-      return { ...e, data: { raw }, ...edgeVisual(raw) };
+      return { ...e, data: { ...e.data, raw }, ...edgeVisual(raw) };
     }));
   };
 
@@ -740,6 +779,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
   if (loadError) return <div className="center-msg">Couldn't open this canvas: {loadError}</div>;
 
   const oneEdge = selEdges.length === 1 && selNodes.length === 0 ? selEdges[0] : null;
+  const oneNode = selNodes.length === 1 && selEdges.length === 0 ? selNodes[0] : null;
   const nodeRaws = selNodes.map((n) => n.data.raw);
   const textRaws = nodeRaws.filter((r) => r.type === "text");
   const edgeRaws = selEdges.map((e) => e.data!.raw);
@@ -877,10 +917,25 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
                 <button onClick={(e) => onEdgeDoubleClick(e, oneEdge)}>Label…</button>
               </>
             )}
+            {oneNode && (
+              <>
+                <span className="sep" />
+                <button onClick={() => setPortsOpen((v) => !v)} aria-pressed={portsOpen}
+                  title="Named connection points on this node's sides">
+                  Ports{portsOf(oneNode.data.raw).length ? ` (${portsOf(oneNode.data.raw).length})` : "…"}
+                </button>
+              </>
+            )}
             <span className="sep" />
             {selNodes.length > 0 && <button onClick={() => void saveSelectionAsTemplate()}
               title="Keep the selected nodes (and the edges between them) as a reusable template">Save as template…</button>}
             <button onClick={deleteSelection} title="Delete (Del)">Delete</button>
+          </Panel>
+        )}
+        {!readOnly && portsOpen && oneNode && (
+          <Panel position="top-right">
+            <PortsPanel ports={portsOf(oneNode.data.raw)} onClose={() => setPortsOpen(false)}
+              onChange={(ps, renamed) => setPorts(oneNode.id, ps, renamed)} />
           </Panel>
         )}
         {conflict && (

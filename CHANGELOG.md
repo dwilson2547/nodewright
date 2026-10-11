@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.11.0 - 2026-10-11
+
+### Added
+- Node ports: named connection points at chosen places on a node's sides. Select one node and
+  open **Ports** to apply a preset (1–3 in/out, top/bottom, 2 per side) or add, label, move and
+  delete ports. A node with ports shows those pins instead of its four side handles; lines drawn
+  from a pin remember it (`fromPort` / `toPort`) and follow it when it moves or is renamed. A line
+  whose port was removed falls back to its side and is marked with a red dashed band. Files stay
+  valid JSON Canvas: each line also keeps the plain side, so Obsidian draws it on the right side.
+- MCP: `add_elements` / `update_elements` take `ports` on nodes and `fromPort` / `toPort` on
+  edges; ports an agent names must exist, and the edge's side follows the port.
+
 ## 0.10.1 - 2026-10-11
 
 ### Fixed

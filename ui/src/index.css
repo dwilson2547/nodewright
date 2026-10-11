@@ -70,6 +70,23 @@ input[type="color"] { width: 24px; height: 22px; padding: 0; border: none; backg
 .nw-group-label { position: absolute; bottom: 100%; left: 0; margin-bottom: 4px; font-weight: 600; font-size: 16px; white-space: nowrap; }
 .nw-handle { width: 9px; height: 9px; background: var(--accent); border: 2px solid var(--node-bg); opacity: 0; transition: opacity .1s; }
 .react-flow__node:hover .nw-handle, .react-flow__node.selected .nw-handle { opacity: 1; }
+/* Ports (ports.ts): always visible, unlike side handles; labels sit just inside the node. */
+.nw-handle.nw-port { opacity: 1; width: 8px; height: 8px; border-radius: 2px; background: var(--node-bg); border: 2px solid var(--node-color, var(--accent)); }
+.react-flow__node:hover .nw-handle.nw-port, .react-flow__node.selected .nw-handle.nw-port { background: var(--accent); border-color: var(--accent); }
+.react-flow__node .nw-handle.nw-handle-hidden { opacity: 0; pointer-events: none; }
+.nw-port-label { position: absolute; font-size: 10px; line-height: 1; color: var(--muted); pointer-events: none; white-space: nowrap; z-index: 1; }
+.nw-port-label.side-left { left: 8px; transform: translateY(-50%); }
+.nw-port-label.side-right { right: 8px; transform: translateY(-50%); }
+.nw-port-label.side-top { top: 7px; transform: translateX(-50%); }
+.nw-port-label.side-bottom { bottom: 7px; transform: translateX(-50%); }
+.nw-edge-dangling { fill: none; stroke: var(--danger); stroke-opacity: .35; stroke-dasharray: 4 6; pointer-events: none; }
+.ports-panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; box-shadow: 0 4px 16px rgb(0 0 0 / .15); max-width: min(540px, 90vw); max-height: 60vh; overflow: auto; font-size: 13px; }
+.ports-panel header { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.ports-row { display: flex; gap: 6px; margin-bottom: 6px; }
+.ports-panel table { border-collapse: collapse; width: 100%; }
+.ports-panel th { text-align: left; font-weight: 600; font-size: 11px; color: var(--muted); padding: 2px 4px; }
+.ports-panel td { padding: 2px 4px; }
+.ports-panel input[type=range] { width: 90px; }
 .react-flow__node.selected .nw-node { box-shadow: 0 0 0 2px var(--accent); }
 /* A selected edge: a soft accent band behind the line (edges.tsx), whatever its colour. */
 .nw-edge-halo { fill: none; stroke: var(--accent); stroke-opacity: .5; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }

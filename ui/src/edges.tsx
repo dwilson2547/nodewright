@@ -107,6 +107,11 @@ export const RoutedEdge = memo((p: EdgeProps<CEdge>) => {
   return (
     <>
     {p.selected && <path d={path} className="nw-edge-halo" style={{ strokeWidth: width + 12 }} />}
+    {p.data?.dangling && (
+      <path d={path} className="nw-edge-dangling" style={{ strokeWidth: width + 8 }}>
+        <title>This line names a port its node no longer has; it's drawn from the side instead.</title>
+      </path>
+    )}
     <BaseEdge
       id={p.id}
       path={path}

@@ -1,7 +1,8 @@
 import { createContext, memo, useContext, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { Handle, NodeResizer, Position, useReactFlow, type NodeProps } from "@xyflow/react";
+import { Handle, NodeResizer, Position, useReactFlow, useUpdateNodeInternals, type NodeProps } from "@xyflow/react";
 import { resolveColor, type CNode } from "./canvasMapping";
 import { Markdown, safeUrl } from "./markdown";
+import { portHandle, portsOf, type Port } from "./ports";
 import { attr } from "./styles";
 import { attachmentOf, TabLinksContext, isCanvasFile, linkTarget, subpathNode } from "./tablinks";
 
@@ -12,13 +13,36 @@ const SIDES: [string, Position][] = [
   ["left", Position.Left],
 ];
 
-// Every side is a "source" handle; the flow runs in ConnectionMode.Loose, so
-// any side can connect to any side, as in JSON Canvas.
-function Handles() {
+const POSITION: Record<Port["side"], Position> = {
+  top: Position.Top, right: Position.Right, bottom: Position.Bottom, left: Position.Left,
+};
+
+// Where a port sits along its side, as a handle offset (ports.ts).
+const along = (p: Port): CSSProperties =>
+  p.side === "left" || p.side === "right" ? { top: `${p.at * 100}%` } : { left: `${p.at * 100}%` };
+
+// Every handle is a "source"; the flow runs in ConnectionMode.Loose, so any
+// side or port can connect to any other, as in JSON Canvas. A node with ports
+// shows those instead of the side handles, which stay (hidden, not
+// connectable) for edges whose port has gone.
+function Handles({ id, raw }: { id: string; raw: Record<string, any> }) {
+  const ports = portsOf(raw);
+  const updateInternals = useUpdateNodeInternals();
+  const key = JSON.stringify(ports);
+  useEffect(() => updateInternals(id), [id, key, updateInternals]);
+  const hasPorts = ports.length > 0;
   return (
     <>
-      {SIDES.map(([id, pos]) => (
-        <Handle key={id} id={id} type="source" position={pos} className="nw-handle" />
+      {SIDES.map(([sid, pos]) => (
+        <Handle key={sid} id={sid} type="source" position={pos} isConnectable={!hasPorts}
+          className={"nw-handle" + (hasPorts ? " nw-handle-hidden" : "")} />
+      ))}
+      {ports.map((p) => (
+        <Handle key={p.id} id={portHandle(p.id)} type="source" position={POSITION[p.side]}
+          className="nw-handle nw-port" style={along(p)} title={p.label || p.id} />
+      ))}
+      {ports.filter((p) => p.label).map((p) => (
+        <span key={"l:" + p.id} className={`nw-port-label side-${p.side}`} style={along(p)}>{p.label}</span>
       ))}
     </>
   );
@@ -112,7 +136,7 @@ export const TextNode = memo(({ id, data, selected }: NodeProps<CNode>) => {
     <div className={cls} style={colorStyle(raw)} onDoubleClick={ed.start}>
       {svg}
       <NodeResizer isVisible={selected} minWidth={40} minHeight={30} />
-      <Handles />
+      <Handles id={id} raw={raw} />
       {ed.editing ? (
         <Editor value={ed.draft} onChange={ed.setDraft} onCommit={ed.commit} onCancel={ed.cancel} multiline />
       ) : (
@@ -130,7 +154,7 @@ export const GroupNode = memo(({ id, data, selected }: NodeProps<CNode>) => {
   return (
     <div className={look(raw, "group").cls} style={colorStyle(raw)}>
       <NodeResizer isVisible={selected} minWidth={60} minHeight={60} />
-      <Handles />
+      <Handles id={id} raw={raw} />
       <div className="nw-group-label" onDoubleClick={ed.start}>
         {ed.editing ? (
           <Editor value={ed.draft} onChange={ed.setDraft} onCommit={ed.commit} onCancel={ed.cancel} multiline={false} />
@@ -149,7 +173,7 @@ export const LinkNode = memo(({ id, data, selected }: NodeProps<CNode>) => {
   return (
     <div className={look(raw, "link").cls} style={colorStyle(raw)} onDoubleClick={ed.start}>
       <NodeResizer isVisible={selected} minWidth={80} minHeight={30} />
-      <Handles />
+      <Handles id={id} raw={raw} />
       {ed.editing ? (
         <Editor value={ed.draft} onChange={ed.setDraft} onCommit={ed.commit} onCancel={ed.cancel} multiline={false} />
       ) : (
@@ -209,7 +233,7 @@ export const FileNode = memo(({ id, data, selected }: NodeProps<CNode>) => {
     <div className={look(raw, "file").cls + (tabLink ? " nw-canvaslink" : "") + (attached ? " nw-attachment" : "")}
       style={colorStyle(raw)} onDoubleClick={attached ? undefined : ed.start}>
       <NodeResizer isVisible={selected} minWidth={80} minHeight={30} />
-      <Handles />
+      <Handles id={id} raw={raw} />
       {ed.editing ? (
         <Editor value={ed.draft} onChange={ed.setDraft} onCommit={ed.commit} onCancel={ed.cancel} multiline={false} />
       ) : attached ? <AttachmentView raw={raw} /> : tabLink ? <CanvasLink raw={raw} /> : (

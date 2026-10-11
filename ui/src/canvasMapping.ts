@@ -3,11 +3,12 @@
 // (style extensions, other tools' fields) survive every save.
 import type { Edge, Node } from "@xyflow/react";
 import type { JsonCanvas } from "./api";
+import { endHandle } from "./ports";
 import { attr, dashArray, lineWidth } from "./styles";
 
 export type Side = "top" | "right" | "bottom" | "left";
 export type CanvasNodeData = { raw: Record<string, any> };
-export type CanvasEdgeData = { raw: Record<string, any> };
+export type CanvasEdgeData = { raw: Record<string, any>; dangling?: boolean };
 export type CNode = Node<CanvasNodeData>;
 export type CEdge = Edge<CanvasEdgeData>;
 
@@ -78,6 +79,14 @@ export function edgeVisual(raw: Record<string, any>) {
   };
 }
 
+/** Handles for an edge's ends (ports.ts), with `dangling` set when a named port is missing. */
+export function edgeEnds(e: Record<string, any>, from: Record<string, any> | undefined,
+  to: Record<string, any> | undefined, fs = "right", ts = "left") {
+  const [sourceHandle, ds] = endHandle(from, e.fromPort, e.fromSide ?? fs);
+  const [targetHandle, dt] = endHandle(to, e.toPort, e.toSide ?? ts);
+  return { sourceHandle, targetHandle, data: { raw: e, dangling: ds || dt } };
+}
+
 export function toFlow(doc: JsonCanvas): { nodes: CNode[]; edges: CEdge[] } {
   const rawNodes = Array.isArray(doc.nodes) ? doc.nodes : [];
   const byId = new Map(rawNodes.map((n: any) => [n.id, n]));
@@ -95,15 +104,7 @@ export function toFlow(doc: JsonCanvas): { nodes: CNode[]; edges: CEdge[] } {
   const edges: CEdge[] = (Array.isArray(doc.edges) ? doc.edges : []).map((e: any) => {
     const from = byId.get(e.fromNode), to = byId.get(e.toNode);
     const [fs, ts] = from && to ? facingSides(from, to) : ["right", "left"];
-    return {
-      id: e.id,
-      source: e.fromNode,
-      target: e.toNode,
-      sourceHandle: e.fromSide ?? fs,
-      targetHandle: e.toSide ?? ts,
-      data: { raw: e },
-      ...edgeVisual(e),
-    };
+    return { id: e.id, source: e.fromNode, target: e.toNode, ...edgeEnds(e, from, to, fs, ts), ...edgeVisual(e) };
   });
   return { nodes, edges };
 }
