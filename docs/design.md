@@ -355,17 +355,33 @@ for an admin to unlist items before it is opened up. ⚠ unverified: no abuse/mo
 
 User direction 2026-10-11 (✅ user): architecture diagrams often link to the schema of a connection
 between apps; nodewright should store that schema **in** the diagram, visible and syntax
-highlighted. Formats to start: Avro, Protobuf, JSON (incl. JSON Schema), YAML. A typed node with a
-parser that reads those files into the element.
+highlighted. Formats to start: Avro, Protobuf, JSON (incl. JSON Schema), YAML, and SQL
+(✅ user, added the same day). A typed node with a parser that reads those files into the element.
 
-Not designed yet. Constraints already known:
+Proposed design (not yet agreed):
 
-- It must stay a valid JSON Canvas file (§3.2): a text node whose body is the schema source, with
-  extra keys for the type, so Obsidian still shows the text.
-- Highlighting and parsing happen in the UI; the stored form is the source text, so a parse
-  failure never loses data.
-- Field-level edges (an edge to one field of a message) need node ports, which come first in the
-  §8 order and are shared with schematics.
+- **Stored as a text node** with `schema: "avro"|"protobuf"|"json"|"yaml"|"sql"` and `text` holding
+  the source as a fenced code block (```` ```avro ````). Obsidian shows it as a highlighted code
+  block, so the file degrades well and stays valid JSON Canvas.
+- **Shown** as a header (format and the schema's name: Avro record, first Protobuf message, first
+  SQL table, JSON Schema `title`) above the highlighted source with fixed metrics (monospace,
+  fixed line height). Height always fits the source; only the width is resizable, so a line's y
+  position is known. Highlighting: highlight.js (json for Avro, yaml, protobuf, sql), bundled.
+- **Parsed on the server** (`schemas.py`, one parser for UI and agents) into fields
+  `{path, name, type, line}`: Avro record fields (nested records → `a.b`), JSON Schema
+  `properties` (or a plain JSON/YAML example's keys), Protobuf message fields, SQL
+  `CREATE TABLE` columns (`table.column`). JSON, Avro and YAML are read with a YAML composer for
+  exact line numbers. PyYAML is a new dependency.
+- **A port per field on each side**: `<path>` on the right and `<path>@left` on the left, at that
+  field's line (§13.1). They are written into the node's `ports`, so share links, render, Obsidian
+  round trips and agents see ordinary ports. The UI calls `POST /api/schemas/parse` after an
+  edit; agent writes with `schema` are parsed on the server. A parse error shows in the node and
+  leaves the ports empty, so lines on fields go dangling (flagged) until it's fixed, not deleted.
+- **Creating:** a `+ Schema` menu with a sample per format, or drop a schema file (`.avsc`,
+  `.proto`, `.json`, `.yaml`/`.yml`, `.sql`) onto the canvas to get a schema node instead of an
+  attachment. Double-click edits the source.
+- **MCP:** `add_elements` takes `schema` + `text` (plain or fenced); fields come back so an agent
+  can connect `fromPort: "orders.customer_id"` to `toPort: "customers.id@left"`.
 
 ## 13. Node ports and custom icons 📐
 
