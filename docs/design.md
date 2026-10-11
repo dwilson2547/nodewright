@@ -366,3 +366,63 @@ Not designed yet. Constraints already known:
   failure never loses data.
 - Field-level edges (an edge to one field of a message) need node ports, which come first in the
   §8 order and are shared with schematics.
+
+## 13. Node ports and custom icons — proposal 📐
+
+Proposed 2026-10-11, not yet agreed. User direction (✅ user): connection points are attributes
+with locations, and the user sets their number and placement in the editor; uploaded SVGs are
+scanned before import to verify they carry no script.
+
+### 13.1 Ports
+
+- **Node:** an extension key `ports`, an array of `{id, side, at, label?}`. `side` is
+  top/right/bottom/left; `at` is the fraction along that side (0 = top/left end, 1 = bottom/right
+  end), so ports follow a resize. Side plus fraction rather than free x/y because the router needs
+  an exit direction, and schematic pins and schema fields always sit on a boundary.
+- **Edge:** `fromPort` / `toPort` name a port id. The edge also keeps `fromSide` / `toSide` set to
+  that port's side, so Obsidian and older nodewright still draw it on the right side of the node.
+- **Rendering:** a node with `ports` shows those handles instead of the four side-centre handles. A
+  node without `ports` behaves exactly as today. The router already takes a start point and a
+  side, so ports feed it unchanged; no routing change.
+- **Editor:** selecting one node adds a Ports control: presets (none, 1 per side, 2 left / 2 right,
+  ...), plus add, drag along a side, label and delete. Labels render inside the node next to the
+  port.
+- **Dangling references:** an edge whose port no longer exists falls back to its side and is
+  flagged in the editor. Nothing is deleted.
+- **Derived ports:** a node type may compute its ports instead of storing them. Schema nodes (§12)
+  derive one port per field (`id` = the field path), so an edge can point at a single field.
+- **MCP:** `add_elements` / `update_elements` accept `ports` on nodes and `fromPort` / `toPort` on
+  edges, checked against the node's ports. `get_canvas` returns them.
+- No migration: everything lives in the canvas JSON. `canvas_format` already leaves unknown keys
+  alone; ports get a shape check like `styleAttributes`.
+
+### 13.2 Icons
+
+- **Upload with validation.** Parse the SVG with a hardened XML parser (no DTDs or entities). Then
+  check every element and attribute against an **allowlist** of drawing elements (svg, g, path,
+  basic shapes, text, gradients, clipPath, mask, symbol, use, title, desc) and presentation
+  attributes. Reject the upload and name what was found. An allowlist rather than a script scan,
+  because script also gets in through `on*` handlers, `javascript:` hrefs, `foreignObject`,
+  external `href`/`url()` references and CSS. What is stored is re-serialised from the parsed
+  tree, never the uploaded bytes. Size and element-count caps.
+- **Rendered as images, never inline markup,** so even a validator miss can't run script.
+  Monochrome icons are drawn with CSS `mask-image` filled with the node's colour, so they recolour
+  like everything else. Full-colour icons use `<img>`. The user picks which kind at upload.
+- **Library:** an `icons` table (owner, name, svg, monochrome, default ports) beside templates; an
+  Alembic migration. Per user now, per organisation once those exist. Plus a small built-in set
+  for architecture diagrams (server, database, queue, cache, user, cloud, lock, ...). The source
+  of that set (e.g. Lucide) and its licence are ⚠ unverified until chosen.
+- **In a canvas:** a text node with an extension key `icon: "icons/<id>/<name>.svg"`. The icon is
+  drawn above the text, and the text becomes the caption. In Obsidian it degrades to the caption.
+  Zip export (§3.3) adds `icons/<id>/<name>.svg`.
+- **Icons carry default ports**, so a dropped symbol arrives with its pins (a resistor with two).
+  This is what schematics are built from.
+- **Designer later:** first an SVG source editor with live preview and the same validator, then
+  drawing tools if they're still wanted.
+
+### 13.3 Proposed order
+
+1. Ports (format, rendering, editor, MCP). No migration. Unblocks schemas.
+2. Icons: upload validation, library + migration, built-in set, icon on text nodes, zip export.
+3. Default ports on icons, then schema nodes (§12) with derived field ports.
+4. The icon designer.
