@@ -14,6 +14,7 @@ node can override it with styleAttributes.iconColors = "original".
 
 from __future__ import annotations
 
+import json
 import re
 from functools import cache
 from pathlib import Path
@@ -29,6 +30,7 @@ BUILTIN_PREFIX = "lucide-"
 REF_RE = re.compile(r"^icons/([a-z0-9-]{1,64})/[^/]{1,200}\.svg$")
 MAX_PER_USER = 500
 MAX_NAME = 100
+MAX_SOURCE = 200_000  # bytes of JSON: the icon creator's drawing
 
 
 class IconError(Exception):
@@ -67,7 +69,18 @@ def out(icon: Icon | dict) -> dict:
     else:
         i, name, tinted, p, builtin = icon.id, icon.name, icon.tinted, icon.ports or [], False
     return {"id": i, "name": name, "file": ref(i, name), "url": f"/api/icons/{i}.svg",
-            "tinted": tinted, "ports": p, "builtin": builtin}
+            "tinted": tinted, "ports": p, "builtin": builtin,
+            "editable": not builtin and icon.source is not None}
+
+
+def _source(value) -> dict | None:
+    """The creator's drawing is the UI's own format: stored as given, only
+    shape- and size-checked. The SVG it produced is what's validated and shown."""
+    if value is None:
+        return None
+    if not isinstance(value, dict) or len(json.dumps(value)) > MAX_SOURCE:
+        raise IconError(f"source must be an object of at most {MAX_SOURCE // 1000} KB of JSON")
+    return value
 
 
 def mine(s: Session, user: User) -> list[Icon]:
@@ -98,7 +111,8 @@ def _ports(value) -> list[dict]:
         raise IconError(str(exc)) from None
 
 
-def create(s: Session, user: User, name, svg: str, tinted: bool, port_list=None) -> Icon:
+def create(s: Session, user: User, name, svg: str, tinted: bool, port_list=None,
+           source=None) -> Icon:
     count = s.scalar(select(func.count()).select_from(Icon).where(Icon.owner_id == user.id))
     if count >= MAX_PER_USER:
         raise IconError(f"you can keep at most {MAX_PER_USER} icons")
@@ -107,7 +121,7 @@ def create(s: Session, user: User, name, svg: str, tinted: bool, port_list=None)
     except svgsafe.SvgRejected as exc:
         raise IconError(str(exc)) from None
     icon = Icon(owner_id=user.id, name=_name(name), svg=clean, tinted=bool(tinted),
-                ports=_ports(port_list))
+                ports=_ports(port_list), source=_source(source))
     s.add(icon)
     s.flush()
     return icon
@@ -127,6 +141,8 @@ def update(icon: Icon, fields: dict) -> Icon:
         icon.tinted = bool(fields["tinted"])
     if "ports" in fields:
         icon.ports = _ports(fields["ports"])
+    if "source" in fields:
+        icon.source = _source(fields["source"])
     if "svg" in fields:
         try:
             icon.svg = svgsafe.clean(str(fields["svg"]).encode())

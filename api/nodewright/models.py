@@ -334,7 +334,9 @@ class ShareLink(Base):
 class Icon(Base):
     """A user's uploaded or drawn icon (design §13.2, icons.py): an SVG that
     passed svgsafe.clean(), how it's drawn by default when placed (`tinted`:
-    filled with the node's colour) and the ports a node gets with it."""
+    filled with the node's colour) and the ports a node gets with it.
+    `source` is the icon creator's drawing (shapes and pins) when it was made
+    there, so it can be opened again; uploaded icons have none."""
     __tablename__ = "icons"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
@@ -343,5 +345,6 @@ class Icon(Base):
     svg: Mapped[str] = mapped_column(Text)
     tinted: Mapped[bool] = mapped_column(Boolean, default=True)
     ports: Mapped[list] = mapped_column(Json, default=list)
+    source: Mapped[dict | None] = mapped_column(Json, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

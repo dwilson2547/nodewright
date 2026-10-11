@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import json
 import logging
 import os
@@ -70,6 +71,7 @@ class IconIn(BaseModel):
     svg: str = Field(min_length=1, max_length=svgsafe.MAX_BYTES)
     tinted: bool = True
     ports: list[dict] = []
+    source: dict | None = None
 
 
 class IconPatch(BaseModel):
@@ -77,6 +79,7 @@ class IconPatch(BaseModel):
     svg: str | None = Field(default=None, min_length=1, max_length=svgsafe.MAX_BYTES)
     tinted: bool | None = None
     ports: list[dict] | None = None
+    source: dict | None = None
 
 
 class RoleIn(BaseModel):
@@ -676,7 +679,8 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
     @app.post("/api/icons", status_code=201)
     def create_icon(body: IconIn, user: User = Depends(user_dep), s: Session = Depends(session)):
         try:
-            return icons.out(icons.create(s, user, body.name, body.svg, body.tinted, body.ports))
+            return icons.out(icons.create(s, user, body.name, body.svg, body.tinted, body.ports,
+                                          body.source))
         except icons.IconError as exc:
             raise icon_error(exc) from None
 
@@ -698,14 +702,28 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
         return Response(status_code=204)
 
     @app.get("/api/icons/{icon_id}.svg")
-    def icon_svg(icon_id: str, s: Session = Depends(session)):
-        """By id, without sign-in: share links and members show icons they don't own."""
+    def icon_svg(icon_id: str, request: Request, s: Session = Depends(session)):
+        """By id, without sign-in: share links and members show icons they don't own.
+        Revalidated by ETag, so an edited icon shows at once and an unchanged one costs a 304."""
         svg = icons.svg_for(s, icon_id)
         if svg is None:
             raise HTTPException(404, "no such icon")
-        return Response(svg, media_type="image/svg+xml", headers={
-            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
-            "Cache-Control": "private, max-age=300"})
+        etag = '"' + hashlib.sha256(svg.encode()).hexdigest()[:20] + '"'
+        headers = {"ETag": etag, "Cache-Control": "private, no-cache",
+                   "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox"}
+        if request.headers.get("if-none-match") == etag:
+            return Response(status_code=304, headers=headers)
+        return Response(svg, media_type="image/svg+xml", headers=headers)
+
+    # After the .svg route, which would otherwise match here.
+    @app.get("/api/icons/{icon_id}")
+    def get_icon(icon_id: str, user: User = Depends(user_dep), s: Session = Depends(session)):
+        """One of your icons with its creator drawing, to edit it."""
+        try:
+            icon = icons.get_own(s, user, icon_id)
+        except icons.IconError as exc:
+            raise icon_error(exc) from None
+        return {**icons.out(icon), "source": icon.source}
 
     # --- templates (templates.py) ------------------------------------------
 

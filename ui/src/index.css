@@ -127,6 +127,37 @@ input[type="color"] { width: 24px; height: 22px; padding: 0; border: none; backg
 .palette-icon .tab-x { position: absolute; top: -4px; right: -4px; display: none; }
 .palette-icon:hover .tab-x { display: block; }
 .palette-search { width: 100%; margin-bottom: 6px; }
+.palette-icon .tab-x.edit { right: auto; left: -4px; }
+/* An icon without a caption fills its node, so pins on the node's sides meet the drawing's edges. */
+.nw-node.has-icon.no-caption .nw-icon { margin: 0; width: 100%; height: 100%; }
+.nw-node.has-icon.no-caption .nw-body { display: none; }
+.nw-node.has-icon.border-invisible { background: transparent; }
+/* icon creator (IconCreator.tsx) */
+.icon-creator { width: min(860px, 96vw); }
+.ic-body { display: grid; grid-template-columns: auto minmax(260px, 1fr) 200px; gap: 12px; align-items: start; }
+.ic-tools { display: flex; flex-direction: column; gap: 4px; }
+.ic-tools button { width: 34px; height: 34px; font-size: 16px; padding: 0; }
+.ic-tools button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.ic-tools .sep { height: 6px; }
+.ic-canvas { width: 100%; max-width: 480px; aspect-ratio: 1; background: var(--node-bg); border: 1px solid var(--border); border-radius: 6px; touch-action: none; user-select: none; }
+.ic-canvas.tool-select { cursor: default; }
+.ic-canvas:not(.tool-select) { cursor: crosshair; }
+.ic-grid { stroke: var(--border); stroke-width: .25; }
+.ic-box { fill: none; stroke: var(--muted); stroke-width: .4; stroke-dasharray: 2 2; pointer-events: none; }
+.ic-handle { fill: var(--panel); stroke: var(--accent); stroke-width: .6; cursor: pointer; }
+.ic-handle.bulge { fill: var(--accent); }
+.ic-pin { fill: var(--panel); stroke: var(--accent); stroke-width: .8; cursor: grab; }
+.ic-pin.on { fill: var(--accent); }
+.ic-pin-label { font-size: 4px; fill: var(--muted); pointer-events: none; }
+.ic-props { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.ic-props h4 { margin: 0; text-transform: capitalize; }
+.ic-props label { display: flex; align-items: center; gap: 6px; justify-content: space-between; }
+.ic-props input[type=number] { width: 64px; }
+.ic-props input:not([type]), .ic-props select { width: 110px; }
+.ic-props hr { width: 100%; border: none; border-top: 1px solid var(--border); }
+.ic-foot button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.ic-foot { display: flex; align-items: center; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+@media (max-width: 720px) { .ic-body { grid-template-columns: 1fr; } .ic-tools { flex-direction: row; flex-wrap: wrap; } }
 .nw-node.align-right .nw-body { text-align: right; }
 .react-flow__node.selected .nw-node.svgshape, .react-flow__node.selected .nw-node.shape-circle { box-shadow: none; outline: 2px dashed var(--accent); outline-offset: 3px; }
 .nw-markers { position: absolute; width: 0; height: 0; }

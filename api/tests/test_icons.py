@@ -15,6 +15,8 @@ def test_icon_library_upload_serve_and_delete(app_and_provider, client):
     r = client.get(server["url"])
     assert r.status_code == 200 and r.headers["content-type"].startswith("image/svg+xml")
     assert "sandbox" in r.headers["content-security-policy"]
+    again = client.get(server["url"], headers={"If-None-Match": r.headers["etag"]})
+    assert again.status_code == 304
 
     bad = client.post("/api/icons", json={"name": "x", "svg": SQUARE.replace("<rect", "<script/><rect")},
                       headers=H)
@@ -62,3 +64,20 @@ def test_icons_on_nodes_and_in_zip_export(client):
     assert "icons/lucide-server/Server.svg" in zf.namelist()
     assert zf.read("icons/lucide-server/Server.svg").startswith(b"<svg")
     assert json.loads(zf.read("Untitled.canvas"))["nodes"][0]["icon"] == "icons/lucide-server/Server.svg"
+
+
+def test_creator_source_round_trips(client):
+    src = {"version": 1, "shapes": [{"kind": "rect", "x": 10, "y": 10, "w": 80, "h": 40}], "pins": []}
+    icon = client.post("/api/icons", json={"name": "Box", "svg": SQUARE, "source": src}, headers=H).json()
+    assert icon["editable"] is True
+    got = client.get(f"/api/icons/{icon['id']}").json()
+    assert got["source"] == src
+    src["shapes"].append({"kind": "line", "x1": 0, "y1": 0, "x2": 1, "y2": 1})
+    client.patch(f"/api/icons/{icon['id']}", json={"source": src, "svg": SQUARE}, headers=H)
+    assert len(client.get(f"/api/icons/{icon['id']}").json()["source"]["shapes"]) == 2
+    up = client.post("/api/icons", json={"name": "Up", "svg": SQUARE}, headers=H).json()
+    assert up["editable"] is False
+    assert all(not i["editable"] for i in client.get("/api/icons").json()["builtin"])
+    big = {"x": "y" * 300_000}
+    assert client.post("/api/icons", json={"name": "Big", "svg": SQUARE, "source": big},
+                       headers=H).status_code == 422

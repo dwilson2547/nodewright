@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type DragEvent } from "react";
 import { api, type Icon, type JsonCanvas, type Template, type TemplateKind } from "./api";
+import { IconCreator } from "./IconCreator";
 import { ICON_DRAG_TYPE } from "./icons";
 import { DEFAULT_COLOR, resolveColor } from "./canvasMapping";
 import { attr } from "./styles";
@@ -53,6 +54,8 @@ function Icons({ editable, onIcon, fail }: {
 }) {
   const [icons, setIcons] = useState<{ builtin: Icon[]; mine: Icon[] }>({ builtin: [], mine: [] });
   const [q, setQ] = useState("");
+  const [creating, setCreating] = useState<Icon | "new" | null>(null);
+  const [bust, setBust] = useState(0); // reloads previews after an edit keeps the same url
   const file = useRef<HTMLInputElement>(null);
   const load = useCallback(() => { api.icons().then(setIcons, fail); }, [fail]);
   useEffect(load, [load]);
@@ -91,14 +94,16 @@ function Icons({ editable, onIcon, fail }: {
             <button className="palette-insert" draggable={editable} disabled={!editable} onDragStart={drag(i)}
               onClick={() => onIcon(i)} title={editable ? `${i.name}: click to add (or put on the selected text box), or drag` : i.name}>
               {i.tinted
-                ? <span className="glyph" style={{ mask: `url("${i.url}") center / contain no-repeat`, WebkitMask: `url("${i.url}") center / contain no-repeat` }} />
-                : <img className="glyph" src={i.url} alt="" />}
+                ? <span className="glyph" style={{ mask: `url("${i.url}?v=${bust}") center / contain no-repeat`, WebkitMask: `url("${i.url}?v=${bust}") center / contain no-repeat` }} />
+                : <img className="glyph" src={`${i.url}?v=${bust}`} alt="" />}
             </button>
             {!i.builtin && <button className="tab-x" title="Delete icon" onClick={() => void remove(i)}>×</button>}
+            {i.editable && editable && <button className="tab-x edit" title="Edit in the icon creator" onClick={() => setCreating(i)}>✎</button>}
           </div>
         ))}
       </div>
       {editable && <>
+        <button className="palette-save" onClick={() => setCreating("new")}>Create icon…</button>
         <button className="palette-save" onClick={() => file.current?.click()}>Upload SVG icon…</button>
         <input ref={file} type="file" accept=".svg,image/svg+xml" hidden onChange={(e) => {
           const f = e.target.files?.[0];
@@ -106,6 +111,10 @@ function Icons({ editable, onIcon, fail }: {
           if (f) void upload(f);
         }} />
       </>}
+      {creating && (
+        <IconCreator icon={creating === "new" ? undefined : creating} onClose={() => setCreating(null)}
+          onSaved={() => { setCreating(null); setBust((b) => b + 1); load(); }} />
+      )}
     </section>
   );
 }

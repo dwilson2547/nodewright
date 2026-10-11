@@ -153,7 +153,7 @@ export const TextNode = memo(({ id, data, selected }: NodeProps<CNode>) => {
   const ed = useEditable(id, raw, "text");
   const { cls, svg } = look(raw, "text", true);
   return (
-    <div className={cls + (raw.icon ? " has-icon" : "")} style={colorStyle(raw)} onDoubleClick={ed.start}>
+    <div className={cls + (raw.icon ? " has-icon" + (raw.text ? "" : " no-caption") : "")} style={colorStyle(raw)} onDoubleClick={ed.start}>
       {svg}
       <IconView raw={raw} />
       <NodeResizer isVisible={selected} minWidth={40} minHeight={30} />
@@ -162,7 +162,7 @@ export const TextNode = memo(({ id, data, selected }: NodeProps<CNode>) => {
         <Editor value={ed.draft} onChange={ed.setDraft} onCommit={ed.commit} onCancel={ed.cancel} multiline />
       ) : (
         <div className="nw-body">
-          {raw.text ? <Markdown text={raw.text} /> : <span className="muted">Double-click to edit</span>}
+          {raw.text ? <Markdown text={raw.text} /> : raw.icon ? null : <span className="muted">Double-click to edit</span>}
         </div>
       )}
     </div>

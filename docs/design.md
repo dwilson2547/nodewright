@@ -225,7 +225,7 @@ of editor polish.
 4. **Sharing:** ✅ (0.7.0) read-only share links (§9) and folders (§11.2); ✅ (0.8.0) workspace
    members (§11.1). Organisations with built-in roles come last in the order below.
 5. **Next, in order** (✅ user, 2026-10-11): ✅ workspace zip export (0.9.0) → ✅ edge corner radius (0.10.0) →
-   ✅ node ports (0.11.0) → ✅ icons and built-in set (0.12.0) → icon creator (§13) → schema nodes (§12) and schematics → manual edge waypoints →
+   ✅ node ports (0.11.0) → ✅ icons and built-in set (0.12.0) → ✅ icon creator (0.13.0) → schema nodes (§12) and schematics → manual edge waypoints →
    organisations and roles.
 6. **Stretch:** marketplace (§11.5), custom roles.
 
@@ -258,7 +258,7 @@ phase as 0.4.0 (see `CHANGELOG.md`): MCP server, access tokens, auto-layout, edi
 updates, style guides, shapes and line styles, templates, tab links, attachments, and
 `authorize()` with a members table (no sharing UI). 0.7.0 added folders, read-only share links,
 Alembic migrations, CI and the unused-attachment sweep. 0.8.0 added workspace members, 0.9.0 workspace zip
-export, 0.10.0 edge corner radius, 0.11.0 node ports, 0.12.0 icons. Not yet: organisations, zip import. Live updates are in-process, so the chart must stay at
+export, 0.10.0 edge corner radius, 0.11.0 node ports, 0.12.0 icons, 0.13.0 icon creator. Not yet: organisations, zip import. Live updates are in-process, so the chart must stay at
 one replica until `events.py` moves to Postgres LISTEN/NOTIFY.
 
 ## 11. Future: collaboration and community 📐
@@ -404,7 +404,7 @@ from the editor may name missing ones (dangling).
 - No migration: everything lives in the canvas JSON. `canvas_format` already leaves unknown keys
   alone; ports get a shape check like `styleAttributes`.
 
-### 13.2 Icons ✅ (0.12.0, `icons.py`, `svgsafe.py`, `ui/src/icons.ts`; icon creator not yet)
+### 13.2 Icons ✅ (0.12.0, `icons.py`, `svgsafe.py`, `ui/src/icons.ts`; icon creator 0.13.0)
 
 Built as below, with these specifics:
 - Validation: `defusedxml` (no DTD/entities), element and attribute allowlists, `style`
@@ -443,9 +443,17 @@ Built as below, with these specifics:
   Zip export (§3.3) adds `icons/<id>/<name>.svg`.
 - **Icons carry default ports**, so a dropped symbol arrives with its pins (a resistor with two).
   This is what schematics are built from.
-- **Icon creator** (✅ user): compose an icon from basic shapes (rect, ellipse, line, polyline,
-  arc, text) on a grid, with pins placed as default ports. It writes allowlisted SVG, so it goes
-  through the same validator. A raw SVG source view can come with it.
+- **Icon creator** ✅ (0.13.0, `IconCreator.tsx`, `iconDraw.ts`; ✅ user asked for it): a 100x100
+  box on a 5-unit snap grid; tools select/move, rect (corner radius), ellipse, line, polyline
+  (open/closed), arc (drag the chord, then the middle handle or a Bend slider; bulge −1..1 of half
+  the chord), text, and pin (snaps to the nearest box edge; becomes a port). Per-shape stroke,
+  fill and colour; undo/redo, arrow-key nudge, Delete. Saves `toSvg()` output through the same
+  validator, with the pins as ports and the drawing as `source` (nullable `icons.source`,
+  migration `0005`), so icons made here reopen for editing (palette ✎). No raw SVG source view.
+- **Symbols:** an icon with ports is placed as an 80x80 node with no caption and an invisible
+  border, and its icon fills the node, so pins on the node's sides meet the drawing's edges.
+  This holds while the node stays square.
+- Icon SVGs are served with an ETag and `no-cache`, so an edited icon shows at once.
 
 ### 13.3 Proposed order
 

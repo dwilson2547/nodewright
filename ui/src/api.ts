@@ -50,6 +50,7 @@ export type Workspace = {
 };
 export type Icon = {
   id: string; name: string; file: string; url: string; tinted: boolean; ports: Port[]; builtin: boolean;
+  editable: boolean;
 };
 export type Member = { user_id: string; username: string; role: Role };
 export type Members = { members: Member[]; assignable: Role[]; can_manage: boolean };
@@ -108,9 +109,10 @@ export const api = {
     call<ShareLink>("POST", `/api/canvases/${canvasId}/shares`, { all_tabs }),
   revokeShare: (id: string) => call("DELETE", `/api/shares/${id}`),
   icons: () => call<{ builtin: Icon[]; mine: Icon[] }>("GET", "/api/icons"),
-  createIcon: (body: { name: string; svg: string; tinted: boolean; ports?: Port[] }) =>
+  getIcon: (id: string) => call<Icon & { source: unknown }>("GET", `/api/icons/${id}`),
+  createIcon: (body: { name: string; svg: string; tinted: boolean; ports?: Port[]; source?: unknown }) =>
     call<Icon>("POST", "/api/icons", body),
-  patchIcon: (id: string, body: Partial<{ name: string; svg: string; tinted: boolean; ports: Port[] }>) =>
+  patchIcon: (id: string, body: Partial<{ name: string; svg: string; tinted: boolean; ports: Port[]; source: unknown }>) =>
     call<Icon>("PATCH", `/api/icons/${id}`, body),
   deleteIcon: (id: string) => call("DELETE", `/api/icons/${id}`),
   members: (wsId: string) => call<Members>("GET", `/api/workspaces/${wsId}/members`),

@@ -477,11 +477,15 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
       setNodes((ns) => ns.map((n) => (n.id === target.id ? { ...n, data: { raw: iconFields(n.data.raw) } } : n)));
       return;
     }
-    const [w, h] = [120, 120];
+    // An icon with ports is a symbol (a schematic part): no caption or border,
+    // and square, so its pins sit where the drawing's edges are.
+    const symbol = icon.ports.length > 0;
+    const [w, h] = symbol ? [80, 80] : [120, 120];
     const pos = at ?? freeSpot(w, h);
-    const raw = iconFields({
-      id: newId(), type: "text", text: icon.name, x: snapTo(pos.x), y: snapTo(pos.y), width: w, height: h,
+    let raw = iconFields({
+      id: newId(), type: "text", text: symbol ? "" : icon.name, x: snapTo(pos.x), y: snapTo(pos.y), width: w, height: h,
     });
+    if (symbol) raw = withAttr(raw, "border", "invisible");
     const node: CNode = {
       id: raw.id, type: "text", position: { x: raw.x, y: raw.y }, width: w, height: h, zIndex: 1, data: { raw }, selected: true,
     };

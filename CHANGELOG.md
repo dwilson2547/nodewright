@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.13.0 - 2026-10-11
+
+### Added
+- Icon creator (palette → **Create icon…**): draw an icon from rectangles, ellipses, lines,
+  polylines, arcs and text on a snap grid, and put pins on its edges; pins become the icon's
+  ports. Per-shape stroke width, fill and colour, undo/redo, arrow-key nudging. Icons you draw
+  reopen for editing (✎ on the palette icon).
+- Icons with ports are placed as symbols: square, no caption, no border, the drawing filling the
+  node so lines from its pins meet its leads. The groundwork for schematics.
+
+### Changed
+- Database migration `0005` adds `icons.source` (the creator's drawing).
+- Icons are revalidated by ETag instead of cached for 5 minutes, so edits show at once.
+
 ## 0.12.0 - 2026-10-11
 
 ### Added
