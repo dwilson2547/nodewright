@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.15.0 - 2026-10-11
+
+### Added
+- **History** (header): every saved change to the tab, newest first. Runs of autosaves by one
+  person collapse into one row; agent edits, imports and restores are marked.
+- Named versions: **Save version…** names the current state, and ✎ names, renames or unnames any
+  revision. **Named versions only** filters the list.
+- Click a revision to preview it read-only, with the nodes a restore would bring back or change
+  outlined and a summary of what it would do. **Restore** applies it as a normal edit, so Ctrl+Z
+  undoes it, and records which revision it came from.
+- MCP: `list_versions`, `save_version`, and `get_canvas` takes `revision` to read an earlier one.
+
+### Changed
+- Database migration `0006` adds `canvas_revisions.label` and `restored_from`.
+- `GET /api/canvases/{id}/revisions` returns `{current, revisions, more}` (was a bare list) and
+  takes `before` and `named`.
+- Share links use the same read-only view component as the preview (`ReadOnlyFlow.tsx`).
+
 ## 0.14.0 - 2026-10-11
 
 ### Added

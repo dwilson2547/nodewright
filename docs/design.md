@@ -174,7 +174,8 @@ Built in 0.2.0 (✅ verified with the MCP Python SDK client against a local serv
 | `list_workspaces` | Discovery: workspaces with their canvases, plus the user's folders (0.7.0) |
 | `create_workspace`, `create_canvas` | New workspace (optionally into a folder) / tab (returns a `/?canvas=` link) |
 | `create_folder`, `file_workspace` | Organise workspaces into the user's folders, §11.2 (0.7.0) |
-| `get_canvas` | Full JSON Canvas + revision + current lock |
+| `get_canvas` | Full JSON Canvas + revision + current lock; `revision` reads an earlier one (0.15.0) |
+| `list_versions`, `save_version` | The tab's history and named versions, §14 (0.15.0) |
 | `add_elements` | Nodes and edges in one call; agent-chosen ids; `group` to nest; positions optional |
 | `update_elements`, `delete_elements` | Batch edit by id (`null` removes a key; `fit` resizes to text) |
 | `layout` | Re-place all or some nodes; groups move with their contents and refit |
@@ -226,9 +227,8 @@ of editor polish.
    members (§11.1). Organisations with built-in roles come last in the order below.
 5. **Next, in order** (✅ user, 2026-10-11): ✅ workspace zip export (0.9.0) → ✅ edge corner radius (0.10.0) →
    ✅ node ports (0.11.0) → ✅ icons and built-in set (0.12.0) → ✅ icon creator (0.13.0) →
-   ✅ schema nodes (0.14.0) → schematics → manual edge waypoints → organisations and roles.
-   Diagram-level versions (named revisions, history browser, restore; ✅ user prefers this to
-   per-schema versions) are still to be placed in this order.
+   ✅ schema nodes (0.14.0) → ✅ versions (0.15.0, §14; ✅ user: per tab, not per schema or per
+   workspace) → schematics → manual edge waypoints → organisations and roles.
 6. **Stretch:** marketplace (§11.5), custom roles.
 
 Full MCP OAuth (§6.2) was pulled forward and shipped as 0.3.0 (✅ user asked for browser sign-in).
@@ -261,7 +261,7 @@ updates, style guides, shapes and line styles, templates, tab links, attachments
 `authorize()` with a members table (no sharing UI). 0.7.0 added folders, read-only share links,
 Alembic migrations, CI and the unused-attachment sweep. 0.8.0 added workspace members, 0.9.0 workspace zip
 export, 0.10.0 edge corner radius, 0.11.0 node ports, 0.12.0 icons, 0.13.0 icon creator, 0.14.0
-schema nodes. Not yet: organisations, zip import. Live updates are in-process, so the chart must stay at
+schema nodes, 0.15.0 versions. Not yet: organisations, zip import. Live updates are in-process, so the chart must stay at
 one replica until `events.py` moves to Postgres LISTEN/NOTIFY.
 
 ## 11. Future: collaboration and community 📐
@@ -486,3 +486,31 @@ Built as below, with these specifics:
 2. Icons: upload validation, library + migration, built-in set, icon on text nodes, zip export.
 3. Default ports on icons, then schema nodes (§12) with derived field ports.
 4. The icon creator.
+
+## 14. Versions ✅ (0.15.0, `versions.py`, `ui/src/HistoryPanel.tsx`, `Editor.tsx`)
+
+Per tab (✅ user, 2026-10-11): a tab is the diagram, and every save was already a full row in
+`canvas_revisions`. Workspace-wide snapshots were considered and deferred; they would need their
+own table, and a cross-tab restore while others edit those tabs.
+
+- **History panel** (header → History): the tab's revisions newest first, 100 per page
+  (`GET /api/canvases/{id}/revisions?before=&named=`). Autosave makes many revisions, so a run of
+  unnamed revisions by the same person from the same source, each within 15 minutes of the next,
+  collapses into one row ("▸ 14 saves"). Rows say who, when, and whether an agent, an import or a
+  restore made them.
+- **Named versions** are a revision with a `label` (`PATCH .../revisions/{n}`, edit rights; the
+  edit lease isn't needed, since naming doesn't change the document). "Save version…" flushes
+  unsaved edits and names the revision that results. Any later cleanup of old revisions must keep
+  labelled ones; there is no cleanup today.
+- **Preview** (`GET .../revisions/{n}`) draws the old document read-only in place of the editor,
+  outlining nodes a restore would bring back (green) or change (amber), with a one-line summary
+  of what restoring would do. Closing the panel ends the preview.
+- **Restore** puts the old document into the editor as an ordinary edit: one Ctrl+Z away, saved
+  as a new revision with `source: "restore"` and `restored_from`. History is only ever appended.
+  Viewers browse and preview but don't restore or name.
+- **Agents:** `list_versions`, `save_version` (e.g. before a large restructure) and
+  `get_canvas(revision=)`. There is no agent restore; an agent can read an old revision and write
+  it back with the normal tools if asked.
+
+Not done: version history in the zip export, a visual diff of lines, workspace-wide snapshots,
+revision cleanup.
