@@ -99,7 +99,7 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
     store = store or storage.from_settings(settings)
     broker = events.Broker()
     db = Database(settings.database_url, broker)
-    db.create_schema()
+    db.migrate()
     if provider is None and settings.oidc_enabled:
         provider = oidc.Provider(settings)
     if settings.dev_login and not settings.dev_login_enabled:

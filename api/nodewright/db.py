@@ -4,10 +4,14 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 
-from sqlalchemy import create_engine, event
+from importlib.resources import files
+
+from alembic import command
+from alembic.config import Config
+from sqlalchemy import create_engine, event, inspect
 from sqlalchemy.orm import Session, sessionmaker
 
-from .models import Base
+BASELINE = "0001"
 
 
 class Database:
@@ -30,8 +34,18 @@ class Database:
             for canvas_id, ev in pending:
                 self.broker.publish(canvas_id, ev)
 
-    def create_schema(self) -> None:
-        Base.metadata.create_all(self.engine)
+    def migrate(self) -> None:
+        """Bring the schema to the latest migration. A database made by
+        create_all before migrations existed (0.6.0 and earlier) matches the
+        baseline, so it is stamped there first rather than re-created."""
+        cfg = Config()
+        cfg.set_main_option("script_location", str(files("nodewright") / "migrations"))
+        with self.engine.begin() as conn:
+            cfg.attributes["connection"] = conn
+            tables = set(inspect(conn).get_table_names())
+            if "alembic_version" not in tables and "users" in tables:
+                command.stamp(cfg, BASELINE)
+            command.upgrade(cfg, "head")
 
     @contextmanager
     def session(self):

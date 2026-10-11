@@ -1,8 +1,10 @@
 """Database schema.
 
-Bootstrapped with Base.metadata.create_all on start. No Alembic until there is
-data worth migrating; the first change to an existing table after that point
-introduces it with a baseline of this schema.
+Changes go through Alembic (nodewright/migrations; the app upgrades itself at
+start-up, db.Database.migrate). After editing a model, from api/:
+  DATABASE_URL=sqlite:////tmp/nw-mig.db alembic upgrade head
+  DATABASE_URL=sqlite:////tmp/nw-mig.db alembic revision --autogenerate --rev-id NNNN -m "..."
+then read the generated file before committing it.
 """
 
 from __future__ import annotations
