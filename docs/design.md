@@ -149,11 +149,17 @@ revision, so a bad agent edit is one undo away.
 
 ## 8. Phases 📐
 
-1. Skeleton: monorepo, API + Postgres, authentik login, workspaces/tabs, load/save JSON Canvas.
-2. Editor: React Flow mapping with lossless round-trip, snap-to-grid, edge styling, shapes,
-   templates/default pages.
-3. MCP: PAT auth, the tool set above, live push to the browser, layout engine.
-4. Full MCP OAuth, cross-document links, workspace zip import/export.
+Revised 2026-10-11 (proposed): the agent integration is the main appeal (✅ user), so MCP moves ahead
+of editor polish.
+
+1. ✅ Skeleton: API + Postgres, authentik login, workspaces/tabs, load/save, snap-to-grid, basic edge
+   styling, import/export.
+2. **Agents:** personal access tokens, the §7 tool set, layout engine, live push to open tabs (SSE),
+   edit leases (§11.3), style guides (§11.4).
+3. **Editor:** shapes and edge line styles (§3.2), templates and default pages (§4), folders (§11.2),
+   attachments (AIStor).
+4. **Sharing:** read-only share links, workspace members, organisations with built-in roles (§11.1).
+5. **Stretch:** marketplace (§11.5), custom roles, full MCP OAuth, workspace zip import/export.
 
 Each phase ends deployed to the cluster. Biggest risk is editor polish being bottomless; each phase
 needs an explicit stop line.
@@ -176,3 +182,62 @@ Phase 1 ✅ deployed 2026-10-11 as 0.1.0 (see `CHANGELOG.md`). Beyond the phase-
 snap-to-grid (10/20/40 px), edge colour/arrow ends/labels, undo/redo and `.canvas` import/export.
 Not yet: shapes and edge line styles (§3.2), templates (§4), share links, MCP, attachments, Alembic
 (schema is `create_all` at startup, so the first schema change needs migrations set up).
+
+## 11. Future: collaboration and community 📐
+
+User direction 2026-10-11 (✅ user): sharing and collaboration on the same document is the point of
+organisations; fine-grained permissions are a stretch goal that must not be designed out. Folders,
+a public marketplace for template packs and agent instruction sets, and a server-side lock so
+several people's agents don't fight over one document.
+
+### 11.1 Ownership and permissions — leave room now, build later
+
+- Every access check goes through **one function**, `authorize(user, resource, action)`, with
+  actions as strings (`canvas.read`, `canvas.edit`, `canvas.delete`, `workspace.manage`,
+  `members.manage`, ...). Today it answers "owner may do everything". Routes and MCP tools never
+  check ownership themselves, so orgs and roles later change one function, not every endpoint.
+- **Membership table** `workspace_members(workspace_id, principal_type, principal_id, role)`, where
+  a principal is a user or (later) an org group. A role is a named set of actions.
+  - Built-in roles: owner, editor, commenter, viewer.
+  - Custom roles later: a `roles` table holding an action set per org. Org admins pick built-ins or
+    define their own.
+- **Organisations** later: `orgs`, `org_members(org, user, org_role)`, and workspaces owned by an
+  org. Optional mapping from an authentik group claim to org membership/role at sign-in, the same
+  way dxf-converter maps its admin group.
+- Additive tables only, so `create_all` still works until Alembic is introduced. The first
+  *changed* column (not a new table) is the trigger to set up Alembic.
+
+### 11.2 Folders
+
+A workspace holds a tree of folders (`folders(id, workspace_id, parent_id, name, position)`), and a
+canvas gets a nullable `folder_id`. Tabs become "open canvases" rather than "every canvas in the
+workspace". Permissions stay at the workspace level, not per folder (avoids ACL inheritance).
+
+### 11.3 Edit leases (server-side lock)
+
+Compare-and-swap revisions already stop silent overwrites. A lease stops two agents from wasting
+work by colliding in the first place.
+
+- `canvas_leases(canvas_id PK, holder_user, holder_kind ui|agent, client_label, expires_at)`.
+- **TTL 2 min, renewed by activity.** Each MCP write renews it; the browser renews it by heartbeat
+  while the tab has unsaved or active edits.
+- **Agents:** write tools take the lease implicitly. A held lease returns a clear "locked by X
+  (agent of dan), expires in 90 s" error so the agent can wait or move on. Explicit `lock_canvas` /
+  `unlock_canvas` tools are available for long multi-step builds.
+- **Browser:** shows "Claude (dan) is editing" and goes read-only, with live updates streaming in.
+  The owner or an editor can break a lease.
+- **Expiry, not explicit release, is the safety net:** a crashed agent's lease simply lapses.
+
+### 11.4 Agent style guides
+
+A per-user (later per-org) markdown "how I like my diagrams" document plus structured defaults
+(direction, spacing, colours per node kind, preferred templates). Exposed to agents as an MCP
+resource/prompt and returned by `get_canvas`, so agents follow it without being told each time.
+A style guide is also the unit the marketplace shares (§11.5).
+
+### 11.5 Marketplace (stretch)
+
+Public listings of **template packs** and **style guides**: versioned, with author, licence field
+and install count. Installing copies the item into the user's library, so later edits by the author
+don't change installed copies; updates are explicit. Being public, it needs reporting and the ability
+for an admin to unlist items before it is opened up. ⚠ unverified: no abuse/moderation design yet.
