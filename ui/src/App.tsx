@@ -104,6 +104,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [focus, setFocus] = useState<{ canvas: string; node: string } | null>(null);
   const linked = useRef<string | null>(linkedCanvas());
   const editor = useRef<EditorHandle>(null);
@@ -336,6 +337,8 @@ export default function App() {
         <span className="grow" />
         <span className={"status s-" + status}>{STATUS_TEXT[status]}</span>
         {editable && <button onClick={() => fileInput.current?.click()} title="Open a .canvas file as a new tab">Import</button>}
+        <button className={historyOpen ? "on" : ""} onClick={() => setHistoryOpen((v) => !v)} disabled={!tabId}
+          aria-pressed={historyOpen} title="This tab's earlier versions: preview, name and restore">History</button>
         <span className="menu-anchor" onMouseLeave={() => setExportOpen(false)}>
           <button onClick={() => setExportOpen((v) => !v)} aria-expanded={exportOpen}>Export ▾</button>
           {exportOpen && (
@@ -390,6 +393,7 @@ export default function App() {
           <TabLinksContext.Provider value={{ tabs, current: tabId, open: (id, node) => void followLink(id, node) }}>
             <ReactFlowProvider key={tabId}>
               <Editor ref={editor} canvasId={tabId} onStatus={setStatus}
+                historyOpen={historyOpen} onCloseHistory={() => setHistoryOpen(false)}
                 focusNode={focus?.canvas === tabId ? focus.node : undefined}
                 attachmentLimit={config.attachments ? config.max_attachment_bytes : undefined} />
             </ReactFlowProvider>

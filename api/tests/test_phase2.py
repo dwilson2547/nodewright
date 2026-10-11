@@ -330,7 +330,7 @@ def test_mcp_builds_a_diagram_the_ui_can_load(mcp):
     got = web.get(f"/api/canvases/{tab['id']}").json()
     assert got["revision"] == 2 and len(got["data"]["nodes"]) == 2
     assert got["lease"]["kind"] == "agent"
-    revs = web.get(f"/api/canvases/{tab['id']}/revisions").json()
+    revs = web.get(f"/api/canvases/{tab['id']}/revisions").json()["revisions"]
     assert revs[0]["source"] == "mcp"
     assert "already used" in m.error("add_elements", canvas_id=tab["id"],
                                      nodes=[{"id": "web", "text": "dup"}])

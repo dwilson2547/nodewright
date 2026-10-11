@@ -24,7 +24,7 @@ from pydantic import AnyHttpUrl, BaseModel, ConfigDict
 from starlette.routing import Route
 
 from . import (__version__, access, attachments, auth, bundle, canvas_format, events, folders,
-               icons, leases, members, schemas, mcp_server, oauth, oidc, render, shares, storage, styleguide,
+               icons, leases, members, schemas, versions, mcp_server, oauth, oidc, render, shares, storage, styleguide,
                svgsafe, templates, tokens)
 from .config import Settings
 from .db import Database
@@ -36,7 +36,6 @@ log = logging.getLogger("nodewright")
 CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
        "img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; "
        "base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
-REVISION_LIST_LIMIT = 100
 CLIENT_HEADER = "x-nodewright-client"
 SSE_PING_S = 20.0
 SWEEP_FIRST, SWEEP_EVERY = 300.0, 6 * 3600.0  # attachment sweep: after start, then every
@@ -55,6 +54,10 @@ class FolderIn(BaseModel):
 class FolderPatch(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
     parent_id: str | None = None  # only applied when sent; null = top level
+
+
+class LabelIn(BaseModel):
+    label: str | None = Field(default=None, max_length=200)
 
 
 class FileIn(BaseModel):
@@ -500,6 +503,9 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
         if not isinstance(body, dict) or not isinstance(body.get("base_revision"), int):
             raise HTTPException(400, "expected {base_revision, data}")
         data = checked(body.get("data"))
+        restored = body.get("restored_from")
+        if restored is not None and (not isinstance(restored, int) or isinstance(restored, bool)):
+            raise HTTPException(400, "restored_from must be a revision number")
         c = canvas_for(s, user, canvas_id, access.CANVAS_EDIT)
         who = ui_holder(request, user)
         try:
@@ -519,10 +525,11 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
             return JSONResponse(status_code=409, content={
                 "detail": "the canvas changed since you loaded it",
                 "current": {**_canvas_meta(c), "data": c.data}})
+        source = "restore" if restored is not None else "ui"
         s.add(CanvasRevision(canvas_id=c.id, revision=base + 1, data=data, user_id=user.id,
-                             source="ui"))
+                             source=source, restored_from=restored))
         c.workspace.updated_at = now
-        events.queue(s, c.id, {"type": "revision", "revision": base + 1, "source": "ui",
+        events.queue(s, c.id, {"type": "revision", "revision": base + 1, "source": source,
                                "by": user.username, "client": who.key})
         return {"id": c.id, "revision": base + 1, "updated_at": _iso(now)}
 
@@ -545,15 +552,32 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
         s.delete(canvas_for(s, user, canvas_id, access.CANVAS_DELETE))
         return Response(status_code=204)
 
+    # --- history and named versions (versions.py) ---------------------------
+
+    def version_error(exc: versions.VersionError) -> HTTPException:
+        return HTTPException(exc.status, str(exc))
+
     @app.get("/api/canvases/{canvas_id}/revisions")
-    def list_revisions(canvas_id: str, user: User = Depends(user_dep),
-                       s: Session = Depends(session)):
-        c = canvas_for(s, user, canvas_id)
-        rows = s.execute(select(CanvasRevision.revision, CanvasRevision.source,
-                                CanvasRevision.created_at)
-                         .where(CanvasRevision.canvas_id == c.id)
-                         .order_by(CanvasRevision.revision.desc()).limit(REVISION_LIST_LIMIT))
-        return [{"revision": r, "source": src, "created_at": _iso(at)} for r, src, at in rows]
+    def list_revisions(canvas_id: str, before: int | None = None, named: bool = False,
+                       user: User = Depends(user_dep), s: Session = Depends(session)):
+        return versions.listing(s, canvas_for(s, user, canvas_id), before, named)
+
+    @app.get("/api/canvases/{canvas_id}/revisions/{revision}")
+    def get_revision(canvas_id: str, revision: int, user: User = Depends(user_dep),
+                     s: Session = Depends(session)):
+        try:
+            return versions.get(s, canvas_for(s, user, canvas_id), revision)
+        except versions.VersionError as exc:
+            raise version_error(exc) from None
+
+    @app.patch("/api/canvases/{canvas_id}/revisions/{revision}")
+    def name_revision(canvas_id: str, revision: int, body: LabelIn,
+                      user: User = Depends(user_dep), s: Session = Depends(session)):
+        c = canvas_for(s, user, canvas_id, access.CANVAS_EDIT)
+        try:
+            return versions.name(s, c, revision, body.label)
+        except versions.VersionError as exc:
+            raise version_error(exc) from None
 
     @app.get("/api/workspaces/{ws_id}/export")
     def export_workspace(ws_id: str, user: User = Depends(user_dep), s: Session = Depends(session)):

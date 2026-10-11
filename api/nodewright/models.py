@@ -117,10 +117,14 @@ class CanvasRevision(Base):
     revision: Mapped[int] = mapped_column(Integer)
     data: Mapped[dict] = mapped_column(Json)
     source: Mapped[str] = mapped_column(String(16), default="ui")
-    """Who made the change: ui | import | mcp."""
+    """Who made the change: ui | import | mcp | restore."""
     user_id: Mapped[str | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    label: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    """A named version (versions.py); any cleanup of old revisions keeps these."""
+    restored_from: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    """For source=restore: the revision whose document this one brought back."""
 
 
 class WorkspaceMember(Base):

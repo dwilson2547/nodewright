@@ -22,7 +22,7 @@ from mcp.server.streamable_http_manager import StreamableHTTPASGIApp
 from mcp.server.transport_security import TransportSecuritySettings
 
 from . import (__version__, access, attachments, canvas_format, folders, icons, leases, ops, render, storage,
-               styleguide, styles, templates, tokens)
+               styleguide, styles, templates, tokens, versions)
 from .config import Settings
 from .db import Database
 from .models import Attachment, Canvas, User, Workspace
@@ -36,7 +36,8 @@ grouped as tabs in workspaces. You are acting for the signed-in user who connect
   to whatever they connect to. Give nodes your own ids so edges in the same call can
   refer to them. Use `group` to put nodes inside a group node.
 - Edits are operations applied to the latest revision, so you never overwrite the
-  user's concurrent work. Every write is a revision the user can see.
+  user's concurrent work. Every write is a revision the user can see. Before a large
+  restructure, save_version names the current state so the user can restore it.
 - Writing takes a short lock on the canvas so you and the user don't fight. If a
   canvas is locked by someone else, wait or ask the user; don't retry in a loop.
   For a long series of edits call lock_canvas first and unlock_canvas when done.
@@ -121,7 +122,8 @@ def build(db: Database, settings: Settings, store: storage.Store | None = None,
             except leases.Locked as exc:
                 raise ToolError(f"canvas is locked: {exc}. Wait for it to free up, or ask "
                                 "the user.") from None
-            except (ops.OpError, canvas_format.CanvasError, folders.FolderError) as exc:
+            except (ops.OpError, canvas_format.CanvasError, folders.FolderError,
+                    versions.VersionError) as exc:
                 raise ToolError(str(exc)) from None
 
     def write(ctx: Context, canvas_id: str, op) -> dict:
@@ -201,14 +203,42 @@ def build(db: Database, settings: Settings, store: storage.Store | None = None,
         return run(ctx, go)
 
     @server.tool()
-    def get_canvas(ctx: Context, canvas_id: str) -> dict:
+    def get_canvas(ctx: Context, canvas_id: str, revision: Annotated[int | None, Field(
+            description="An earlier revision to read instead of the current document "
+                        "(see list_versions)")] = None) -> dict:
         """The canvas document (JSON Canvas 1.0: nodes and edges), its revision,
         and who holds the edit lock, if anyone."""
         def go(s, user, who):
             c = access.canvas(s, user, canvas_id)
-            return {"id": c.id, "name": c.name, "workspace_id": c.workspace_id,
-                    "revision": c.revision, "lock": leases.describe(leases.active(s, c.id)),
-                    "data": c.data}
+            out = {"id": c.id, "name": c.name, "workspace_id": c.workspace_id,
+                   "revision": c.revision, "lock": leases.describe(leases.active(s, c.id)),
+                   "data": c.data}
+            if revision is not None and revision != c.revision:
+                old = versions.get(s, c, revision)
+                out |= {"revision": revision, "current_revision": c.revision, "data": old["data"]}
+            return out
+        return run(ctx, go)
+
+    @server.tool()
+    def list_versions(ctx: Context, canvas_id: str, named_only: bool = False,
+                      before: int | None = None) -> dict:
+        """The tab's history, newest first, 100 at a time (pass the last revision
+        seen as `before` for more): who changed it, when, from where (ui, mcp,
+        import, restore), and the name of each named version."""
+        def go(s, user, who):
+            return versions.listing(s, access.canvas(s, user, canvas_id), before, named_only)
+        return run(ctx, go)
+
+    @server.tool()
+    def save_version(ctx: Context, canvas_id: str,
+                     name: Annotated[str, Field(min_length=1, max_length=200)],
+                     revision: int | None = None) -> dict:
+        """Name the current revision (or `revision`) as a version the user can find
+        and restore from the History panel, e.g. before a large restructure.
+        Doesn't change the document."""
+        def go(s, user, who):
+            c = access.canvas(s, user, canvas_id, access.CANVAS_EDIT)
+            return versions.name(s, c, revision, name)
         return run(ctx, go)
 
     @server.tool()

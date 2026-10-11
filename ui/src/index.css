@@ -294,3 +294,35 @@ input[type="color"] { width: 24px; height: 22px; padding: 0; border: none; backg
 .member-add { display: flex; gap: 6px; margin-top: 8px; }
 .member-add input { flex: 1; min-width: 0; }
 .sb-shared { margin-left: auto; padding-left: 6px; color: var(--muted); font-size: 11px; }
+
+/* history panel and version preview (HistoryPanel.tsx, Editor.tsx) */
+header button.on { border-color: var(--accent); color: var(--accent); }
+.editor.with-history > .react-flow { position: absolute !important; left: 0; top: 0; right: 280px; bottom: 0; width: auto !important; height: auto !important; }
+.editor.with-palette.with-history > .react-flow { left: 232px; }
+.history { position: absolute; right: 0; top: 0; bottom: 0; width: 280px; box-sizing: border-box; overflow-y: auto; background: var(--panel); border-left: 1px solid var(--border); padding: 0 10px 12px; scrollbar-width: thin; z-index: 6; font-size: 13px; }
+.history .palette-save { margin: 0 0 6px; }
+.hist-filter { display: flex; align-items: center; gap: 4px; margin: 2px 0 8px; font-size: 12px; color: var(--muted); }
+.hist-row { display: flex; align-items: center; gap: 4px; border-radius: 6px; }
+.hist-row:hover { background: var(--bg); }
+.hist-row.on { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.hist-main { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 1px; border: none; background: none; padding: 5px 6px; text-align: left; color: var(--fg); }
+.hist-label { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.hist-row.named .hist-label::before { content: "★ "; color: var(--accent); }
+.hist-meta { font-size: 12px; color: var(--muted); }
+.hist-rev { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.hist-row .tab-x { visibility: hidden; }
+.hist-row:hover .tab-x, .hist-row.named .tab-x { visibility: visible; }
+.hist-more { border: none; background: none; padding: 0 6px 4px; font-size: 11px; color: var(--muted); }
+.hist-more:hover { color: var(--accent); }
+.hist-sub { margin-left: 10px; border-left: 2px solid var(--border); padding-left: 4px; }
+.preview-layer { position: absolute; left: 0; top: 0; bottom: 0; right: 280px; z-index: 5; background: var(--bg); }
+.preview-layer > .react-flow { position: absolute; inset: 0; }
+.preview-banner { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 6; max-width: calc(100% - 32px); box-shadow: 0 4px 16px rgb(0 0 0 / .15); font-size: 13px; }
+.preview-banner button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.preview-banner button.primary:disabled { opacity: .5; }
+.react-flow__node.nw-diff-add .nw-node { box-shadow: 0 0 0 3px #2fa86a; }
+.react-flow__node.nw-diff-change .nw-node { box-shadow: 0 0 0 3px #e0a020; }
+@media (max-width: 700px) {
+  .history { width: 100%; }
+  .editor.with-history > .react-flow, .preview-layer { right: 0; }
+}

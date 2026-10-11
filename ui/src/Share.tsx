@@ -2,18 +2,11 @@
 // token scopes every request (api/nodewright/shares.py). Same renderer as the
 // editor, so shapes, line styles, tab links and attachments look the same.
 import { useCallback, useEffect, useState } from "react";
-import {
-  applyNodeChanges, Background, BackgroundVariant, ConnectionMode, Controls, ReactFlow, ReactFlowProvider,
-  useReactFlow, type NodeChange,
-} from "@xyflow/react";
+import { ReactFlowProvider } from "@xyflow/react";
 import type { CanvasMeta } from "./api";
 import { toFlow, type CEdge, type CNode } from "./canvasMapping";
-import { RoutedEdge } from "./edges";
-import { Markers } from "./markers";
-import { nodeTypes, ReadOnly } from "./nodes";
+import { ReadOnlyFlow } from "./ReadOnlyFlow";
 import { setAttachmentUrl, TabLinksContext } from "./tablinks";
-
-const edgeTypes = { routed: RoutedEdge };
 const token = decodeURIComponent(location.pathname.replace(/^\/s\//, "").split("/")[0] ?? "");
 const base = `/api/s/${encodeURIComponent(token)}`;
 
@@ -30,44 +23,9 @@ async function load(canvasId?: string): Promise<Shared> {
 }
 
 function View({ doc, focus, open }: { doc: Shared; focus?: string; open: (id: string, node?: string) => void }) {
-  const flow = useReactFlow();
-  const [nodes, setNodes] = useState(doc.nodes);
-  const onNodesChange = useCallback((c: NodeChange<CNode>[]) => setNodes((n) => applyNodeChanges(c, n)), []);
-  // Wait for measured sizes, then fit the view or zoom to a linked node.
-  useEffect(() => {
-    let live = true;
-    void (async () => {
-      for (let i = 0; i < 60 && live; i++) {
-        if (doc.nodes.every((n) => flow.getInternalNode(n.id)?.measured.width)) break;
-        await new Promise((ok) => setTimeout(ok, 50));
-      }
-      if (!live) return;
-      if (focus && flow.getNode(focus)) void flow.fitView({ nodes: [{ id: focus }], padding: 0.5, maxZoom: 1 });
-      else void flow.fitView({ padding: 0.1, maxZoom: 1 });
-    })();
-    return () => { live = false; };
-  }, [flow, doc, focus]);
   return (
     <TabLinksContext.Provider value={{ tabs: doc.tabs, current: doc.id, open }}>
-      <ReactFlow
-        nodes={nodes}
-        edges={doc.edges}
-        onNodesChange={onNodesChange}
-        nodeTypes={nodeTypes}
-        edgeTypes={edgeTypes}
-        nodesDraggable={false}
-        nodesConnectable={false}
-        elementsSelectable={false}
-        edgesReconnectable={false}
-        connectionMode={ConnectionMode.Loose}
-        minZoom={0.05}
-        maxZoom={2}
-        proOptions={{ hideAttribution: true }}
-      >
-        <Background variant={BackgroundVariant.Dots} gap={20} />
-        <Controls showInteractive={false} />
-      </ReactFlow>
-      <Markers edges={doc.edges} />
+      <ReadOnlyFlow nodes={doc.nodes} edges={doc.edges} focus={focus} />
     </TabLinksContext.Provider>
   );
 }
@@ -114,11 +72,9 @@ export default function Share() {
         </nav>
       )}
       <main>
-        <ReadOnly.Provider value={true}>
-          <ReactFlowProvider key={doc.id}>
-            <View doc={doc} focus={focus} open={open} />
-          </ReactFlowProvider>
-        </ReadOnly.Provider>
+        <ReactFlowProvider key={doc.id}>
+          <View doc={doc} focus={focus} open={open} />
+        </ReactFlowProvider>
       </main>
     </div>
   );

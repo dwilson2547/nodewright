@@ -60,7 +60,7 @@ def test_save_and_conflict(client):
     stale = client.put(url, json={"base_revision": 1, "data": {"nodes": []}}, headers=H)
     assert stale.status_code == 409
     assert stale.json()["current"]["data"]["nodes"][0]["text"] == "hi"
-    revs = client.get(url + "/revisions").json()
+    revs = client.get(url + "/revisions").json()["revisions"]
     assert [r["revision"] for r in revs] == [2]  # the initial empty tab isn't a recorded save
     assert client.get(url).json()["revision"] == 2
 

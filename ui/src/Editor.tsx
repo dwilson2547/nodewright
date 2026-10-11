@@ -16,6 +16,7 @@ import {
   MiniMap,
   Panel,
   ReactFlow,
+  ReactFlowProvider,
   addEdge,
   reconnectEdge,
   useEdgesState,
@@ -30,6 +31,8 @@ import { ICON_DRAG_TYPE } from "./icons";
 import { DRAG_TYPE, Palette } from "./Palette";
 import { endFields, portsOf, type Port } from "./ports";
 import { PortsPanel } from "./PortsPanel";
+import { HistoryPanel, when } from "./HistoryPanel";
+import { ReadOnlyFlow } from "./ReadOnlyFlow";
 import {
   PRESETS,
   edgeEnds,
@@ -102,15 +105,46 @@ function splitDoc(doc: JsonCanvas) {
   return extra;
 }
 
+/** What restoring `old` over `now` would do, by element id. */
+function diff(old: JsonCanvas, now: JsonCanvas) {
+  const count = (a: { id: string }[] = [], b: { id: string }[] = []) => {
+    const was = new Map(b.map((x) => [x.id, JSON.stringify(x)]));
+    const ids = new Set(a.map((x) => x.id));
+    const added = a.filter((x) => !was.has(x.id)).map((x) => x.id);
+    const changed = a.filter((x) => was.has(x.id) && was.get(x.id) !== JSON.stringify(x)).map((x) => x.id);
+    return { added, changed, removed: b.filter((x) => !ids.has(x.id)).length };
+  };
+  return { nodes: count(old.nodes, now.nodes), edges: count(old.edges, now.edges) };
+}
+
+function summary(d: ReturnType<typeof diff>): string {
+  const n = (k: number, one: string, many: string) => `${k} ${k === 1 ? one : many}`;
+  const parts: string[] = [];
+  const say = (verb: string, nodes: number, edges: number) => {
+    const what = [nodes && n(nodes, "node", "nodes"), edges && n(edges, "line", "lines")].filter(Boolean);
+    if (what.length) parts.push(`${verb} ${what.join(" and ")}`);
+  };
+  say("bring back", d.nodes.added.length, d.edges.added.length);
+  say("remove", d.nodes.removed, d.edges.removed);
+  say("change", d.nodes.changed.length, d.edges.changed.length);
+  return parts.length ? `Restoring would ${parts.join(", ")}.` : "Same as the current version.";
+}
+
+type Preview = { rev: number; at: string; by: string | null; label: string | null; data: JsonCanvas;
+  nodes: CNode[]; edges: CEdge[]; summary: string };
+
 type Props = {
   canvasId: string;
   onStatus: (s: SaveStatus) => void;
+  /** The History panel (HistoryPanel.tsx) is open. */
+  historyOpen?: boolean;
+  onCloseHistory?: () => void;
   focusNode?: string;
   /** Upload limit in bytes when the server stores attachments, else undefined. */
   attachmentLimit?: number;
 };
 
-export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId, onStatus, focusNode, attachmentLimit }, ref) {
+export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId, onStatus, focusNode, attachmentLimit, historyOpen, onCloseHistory }, ref) {
   const [nodes, setNodes, onNodesChange] = useNodesState<CNode>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<CEdge>([]);
   const [loaded, setLoaded] = useState(false);
@@ -125,8 +159,13 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
   const [paletteOpen, setPaletteOpen] = useState(() => localStorage.getItem("nw.palette") !== "0");
   const [tplReload, setTplReload] = useState(0);
   const [portsOpen, setPortsOpen] = useState(false);
+  const [head, setHead] = useState(0);
+  const [previewed, setPreview] = useState<Preview | null>(null);
+  const preview = historyOpen ? previewed : null; // closing the panel ends the preview
   const otherLease = lease && !isMine(lease) ? lease : null;
-  const readOnly = !canEdit || !!otherLease;
+  const writable = canEdit && !otherLease;
+  // While previewing an old version the editor underneath takes no input.
+  const readOnly = !writable || !!preview;
   const flow = useReactFlow<CNode, CEdge>();
   const tabLinks = useContext(TabLinksContext);
   const wrapper = useRef<HTMLDivElement>(null);
@@ -144,6 +183,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
   const timer = useRef<number | undefined>(undefined);
   const retry = useRef<number | undefined>(undefined);
   const inConflict = useRef(false);
+  const restoredFrom = useRef<number | undefined>(undefined);
   const blocked = useRef(false);
   const noticeTimer = useRef<number | undefined>(undefined);
   const groupDrag = useRef<{ id: string; start: { x: number; y: number }; members: Map<string, { x: number; y: number }> } | null>(null);
@@ -185,6 +225,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
       (c) => {
         if (!alive) return;
         revision.current = c.revision;
+        setHead(c.revision);
         workspaceId.current = c.workspace_id;
         setLease(c.lease);
         setCanEdit(c.can_edit);
@@ -225,8 +266,10 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
     setStatus("saving");
     const run = (async () => {
       try {
-        const r = await api.saveCanvas(canvasId, revision.current, JSON.parse(body));
+        const r = await api.saveCanvas(canvasId, revision.current, JSON.parse(body), restoredFrom.current);
+        restoredFrom.current = undefined;
         revision.current = r.revision;
+        setHead(r.revision);
         lastSaved.current = body;
         setStatus(serialize() === body ? "saved" : "unsaved");
         return true;
@@ -275,6 +318,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
     undo.current.push(current.current);
     redo.current = [];
     revision.current = c.revision;
+    setHead(c.revision);
     setLease(c.lease);
     lastSaved.current = current.current = apply(c.data);
     setStatus("saved");
@@ -366,6 +410,53 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
     return save();
   }, [loaded, serialize, save]);
 
+  // --- versions (HistoryPanel.tsx) ----------------------------------------------
+  const openPreview = useCallback(async (rev: number) => {
+    try {
+      const r = await api.revision(canvasId, rev);
+      const d = diff(r.data, JSON.parse(serialize()));
+      const mark = new Map([...d.nodes.added.map((id) => [id, "nw-diff-add"] as const),
+        ...d.nodes.changed.map((id) => [id, "nw-diff-change"] as const)]);
+      const f = toFlow(r.data);
+      setPreview({
+        rev, at: r.created_at, by: r.by, label: r.label, data: r.data, edges: f.edges, summary: summary(d),
+        nodes: f.nodes.map((n) => (mark.has(n.id) ? { ...n, className: mark.get(n.id) } : n)),
+      });
+    } catch (e) {
+      flash(e instanceof Error ? e.message : String(e));
+    }
+  }, [canvasId, serialize, flash]);
+
+  // Restoring is an ordinary edit: one Ctrl+Z away, saved as a new revision
+  // that records where it came from.
+  const restore = () => {
+    if (!preview) return;
+    const now = serialize();
+    if (now !== current.current) undo.current.push(current.current);
+    undo.current.push(now);
+    redo.current = [];
+    restoredFrom.current = preview.rev;
+    current.current = apply(preview.data);
+    if (current.current === lastSaved.current) restoredFrom.current = undefined;
+    setPreview(null);
+    flash(`Restored ${preview.label ? `“${preview.label}”` : `r${preview.rev}`} — Ctrl+Z undoes it.`);
+  };
+
+  const saveVersion = async () => {
+    const label = prompt("Name this version", "")?.trim();
+    if (!label) return;
+    if (!(await flush())) {
+      flash("Couldn't save the latest changes, so no version was named.");
+      return;
+    }
+    try {
+      await api.nameRevision(canvasId, revision.current, label);
+      flash(`Saved version “${label}”.`);
+    } catch (e) {
+      flash(e instanceof Error ? e.message : String(e));
+    }
+  };
+
   useImperativeHandle(ref, () => ({
     flush,
     exportDoc: () => (loaded ? JSON.parse(serialize()) : null),
@@ -391,6 +482,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
   const resolveConflict = async (keepMine: boolean) => {
     if (!conflict) return;
     revision.current = conflict.revision;
+    setHead(conflict.revision);
     inConflict.current = false;
     setConflict(null);
     if (keepMine) {
@@ -867,7 +959,8 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
   return (
     <ReadOnly.Provider value={readOnly}>
     <SchemaOps.Provider value={readOnly ? null : applySchema}>
-    <div className={"editor" + (readOnly ? " readonly" : "") + (paletteOpen ? " with-palette" : "") + (dropping ? " drop-files" : "")}
+    <div className={"editor" + (readOnly ? " readonly" : "") + (paletteOpen && !preview ? " with-palette" : "")
+      + (historyOpen ? " with-history" : "") + (dropping ? " drop-files" : "")}
       ref={wrapper} onDoubleClick={onPaneDoubleClick} onDragOver={onDragOver} onDragLeave={onDragLeave}
       onDrop={(e) => void onDrop(e)}>
       <ReactFlow
@@ -1060,7 +1153,32 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
         )}
       </ReactFlow>
       <Markers edges={edges} />
-      {paletteOpen && (
+      {preview && (
+        <div className="preview-layer">
+          <ReactFlowProvider key={preview.rev}>
+            <ReadOnlyFlow nodes={preview.nodes} edges={preview.edges} colorMode="system" />
+          </ReactFlowProvider>
+          <div className="banner preview-banner">
+            <span>
+              <strong>{preview.label ? `“${preview.label}”` : `Revision ${preview.rev}`}</strong>
+              <span className="muted"> · {when(preview.at)}{preview.by ? ` · ${preview.by}` : ""}</span>
+              <br />
+              {preview.rev === head ? "This is the current version." : preview.summary}
+            </span>
+            {writable && preview.rev !== head && (
+              <button className="primary" onClick={restore}
+                disabled={preview.summary === "Same as the current version."}>Restore</button>
+            )}
+            <button onClick={() => setPreview(null)}>Back to editing</button>
+          </div>
+        </div>
+      )}
+      {historyOpen && (
+        <HistoryPanel canvasId={canvasId} head={head} canEdit={writable} previewing={preview?.rev ?? null}
+          onPreview={(rev) => void openPreview(rev)} onSaveVersion={saveVersion}
+          onClose={() => onCloseHistory?.()} />
+      )}
+      {paletteOpen && !preview && (
         <Palette editable={!readOnly} reloadKey={tplReload} onInsert={(t) => insertTemplate(t)}
           onIcon={(i) => placeIcon(i)}
           onSavePage={savePage} onClose={() => setPaletteOpen(false)} />

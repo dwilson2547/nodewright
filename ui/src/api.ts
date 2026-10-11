@@ -58,6 +58,16 @@ export type SchemaParse = {
 };
 export type Member = { user_id: string; username: string; role: Role };
 export type Members = { members: Member[]; assignable: Role[]; can_manage: boolean };
+
+export type Revision = {
+  revision: number;
+  source: "ui" | "mcp" | "import" | "restore";
+  created_at: string;
+  by: string | null;
+  label: string | null;
+  restored_from: number | null;
+};
+export type History = { current: number; revisions: Revision[]; more: boolean };
 export type Folder = { id: string; name: string; parent_id: string | null };
 export type ShareLink = { id: string; canvas_id: string; all_tabs: boolean; url: string; created_at: string };
 export type CanvasMeta = {
@@ -130,8 +140,18 @@ export const api = {
   createCanvas: (wsId: string, name: string, data?: JsonCanvas, template?: string) =>
     call<CanvasMeta>("POST", `/api/workspaces/${wsId}/canvases`, { name, data, template }),
   canvas: (id: string) => call<CanvasFull>("GET", `/api/canvases/${id}`),
-  saveCanvas: (id: string, base_revision: number, data: JsonCanvas) =>
-    call<{ id: string; revision: number }>("PUT", `/api/canvases/${id}`, { base_revision, data }),
+  saveCanvas: (id: string, base_revision: number, data: JsonCanvas, restored_from?: number) =>
+    call<{ id: string; revision: number }>("PUT", `/api/canvases/${id}`, { base_revision, data, restored_from }),
+  history: (id: string, opts: { before?: number; named?: boolean } = {}) => {
+    const q = new URLSearchParams();
+    if (opts.before !== undefined) q.set("before", String(opts.before));
+    if (opts.named) q.set("named", "true");
+    return call<History>("GET", `/api/canvases/${id}/revisions?${q}`);
+  },
+  revision: (id: string, rev: number) =>
+    call<Revision & { data: JsonCanvas }>("GET", `/api/canvases/${id}/revisions/${rev}`),
+  nameRevision: (id: string, rev: number, label: string | null) =>
+    call<Revision>("PATCH", `/api/canvases/${id}/revisions/${rev}`, { label }),
   patchCanvas: (id: string, patch: { name?: string; position?: number }) =>
     call<CanvasMeta>("PATCH", `/api/canvases/${id}`, patch),
   deleteCanvas: (id: string) => call("DELETE", `/api/canvases/${id}`),
