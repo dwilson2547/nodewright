@@ -4,7 +4,8 @@
 // routing), with a penalty per bend so routes stay simple.
 
 export type Pt = { x: number; y: number };
-export type Rect = { x0: number; y0: number; x1: number; y1: number };
+/** `m` overrides MARGIN: how far routes keep clear of this obstacle. */
+export type Rect = { x0: number; y0: number; x1: number; y1: number; m?: number };
 export type Side = "top" | "right" | "bottom" | "left";
 
 export const MARGIN = 20;
@@ -63,15 +64,17 @@ export function orthoRoute(s: Pt, sSide: Side, t: Pt, tSide: Side, obstacles: Re
   const by0 = Math.min(s1.y, t1.y) - REACH, by1 = Math.max(s1.y, t1.y) + REACH;
   const near = obstacles.filter((r) => r.x1 > bx0 && r.x0 < bx1 && r.y1 > by0 && r.y0 < by1);
   // Blocked zones stop 1px short of the grid lines, so the lines themselves are free.
-  const zones = near.map((r) => ({
-    x0: r.x0 - MARGIN + 1, y0: r.y0 - MARGIN + 1, x1: r.x1 + MARGIN - 1, y1: r.y1 + MARGIN - 1,
-  }));
+  const zones = near.map((r) => {
+    const m = r.m ?? MARGIN;
+    return { x0: r.x0 - m + 1, y0: r.y0 - m + 1, x1: r.x1 + m - 1, y1: r.y1 + m - 1 };
+  });
 
   const xs = new Set([s1.x, t1.x, (s1.x + t1.x) / 2]);
   const ys = new Set([s1.y, t1.y, (s1.y + t1.y) / 2]);
   for (const r of near) {
-    xs.add(r.x0 - MARGIN); xs.add(r.x1 + MARGIN);
-    ys.add(r.y0 - MARGIN); ys.add(r.y1 + MARGIN);
+    const m = r.m ?? MARGIN;
+    xs.add(r.x0 - m); xs.add(r.x1 + m);
+    ys.add(r.y0 - m); ys.add(r.y1 + m);
   }
   const X = [...xs].sort((a, b) => a - b), Y = [...ys].sort((a, b) => a - b);
   const nx = X.length, ny = Y.length;
@@ -154,18 +157,40 @@ export function polyPath(pts: Pt[], radius: number): string {
   return d + ` L ${z.x} ${z.y}`;
 }
 
-/** Point halfway along the polyline, for the label. */
-export function midpoint(pts: Pt[]): Pt {
+/** Point `frac` of the way along the polyline. */
+export function along(pts: Pt[], frac: number): Pt {
   const lens = pts.slice(1).map((p, i) => Math.hypot(p.x - pts[i].x, p.y - pts[i].y));
-  let half = lens.reduce((a, b) => a + b, 0) / 2;
+  let rest = lens.reduce((a, b) => a + b, 0) * frac;
   for (let i = 0; i < lens.length; i++) {
-    if (half <= lens[i] && lens[i] > 0) {
-      const f = half / lens[i];
+    if (rest <= lens[i] && lens[i] > 0) {
+      const f = rest / lens[i];
       return { x: pts[i].x + (pts[i + 1].x - pts[i].x) * f, y: pts[i].y + (pts[i + 1].y - pts[i].y) * f };
     }
-    half -= lens[i];
+    rest -= lens[i];
   }
-  return pts[0];
+  return pts[pts.length - 1];
+}
+
+export function midpoint(pts: Pt[]): Pt {
+  return along(pts, 0.5);
+}
+
+const overlaps = (a: Rect, b: Rect) => a.x0 < b.x1 && a.x1 > b.x0 && a.y0 < b.y1 && a.y1 > b.y0;
+const straddles = (a: Rect, f: Rect) => overlaps(a, f) &&
+  !(a.x0 >= f.x0 && a.x1 <= f.x1 && a.y0 >= f.y0 && a.y1 <= f.y1);
+
+/** Where along the route to put a w x h label: the point nearest the middle
+ * whose label box clears every obstacle and doesn't straddle a frame (a
+ * group's border); the middle if nowhere does. */
+export function labelPoint(pts: Pt[], w: number, h: number, obstacles: Rect[], frames: Rect[]): Pt {
+  for (const off of [0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35]) {
+    for (const frac of off ? [0.5 - off, 0.5 + off] : [0.5]) {
+      const p = along(pts, frac);
+      const box = { x0: p.x - w / 2, y0: p.y - h / 2, x1: p.x + w / 2, y1: p.y + h / 2 };
+      if (!obstacles.some((r) => overlaps(box, r)) && !frames.some((f) => straddles(box, f))) return p;
+    }
+  }
+  return along(pts, 0.5);
 }
 
 // React Flow's default bezier (getBezierPath, curvature 0.25), so we can tell
