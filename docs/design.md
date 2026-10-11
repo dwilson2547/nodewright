@@ -213,9 +213,12 @@ of editor polish.
 3. ✅ (0.4.0) **Editor:** shapes and edge line styles (§3.2), templates and default pages (§4),
    tab links and attachments (§3.3). Folders (§11.2) followed in 0.7.0 with Alembic (✅ user
    approved the migration).
-4. **Sharing:** ✅ (0.7.0) read-only share links (§9) and folders (§11.2); next workspace members,
-   then organisations with built-in roles (§11.1).
-5. **Stretch:** marketplace (§11.5), custom roles, workspace zip import/export.
+4. **Sharing:** ✅ (0.7.0) read-only share links (§9) and folders (§11.2); ✅ (0.8.0) workspace
+   members (§11.1). Organisations with built-in roles come last in the order below.
+5. **Next, in order** (✅ user, 2026-10-11): workspace zip export → edge corner radius → custom
+   icons and node ports → schema nodes (§12) and schematics → manual edge waypoints →
+   organisations and roles.
+6. **Stretch:** marketplace (§11.5), custom roles.
 
 Full MCP OAuth (§6.2) was pulled forward and shipped as 0.3.0 (✅ user asked for browser sign-in).
 
@@ -245,7 +248,7 @@ Phase 1 ✅ deployed 2026-10-11 as 0.1.0; phase 2 ✅ as 0.2.0, MCP OAuth sign-i
 phase as 0.4.0 (see `CHANGELOG.md`): MCP server, access tokens, auto-layout, edit leases, SSE live
 updates, style guides, shapes and line styles, templates, tab links, attachments, and
 `authorize()` with a members table (no sharing UI). 0.7.0 added folders, read-only share links,
-Alembic migrations, CI and the unused-attachment sweep. Not yet: workspace members UI,
+Alembic migrations, CI and the unused-attachment sweep. 0.8.0 added workspace members. Not yet:
 organisations, zip export. Live updates are in-process, so the chart must stay at
 one replica until `events.py` moves to Postgres LISTEN/NOTIFY.
 
@@ -262,9 +265,16 @@ several people's agents don't fight over one document.
   actions as strings (`canvas.read`, `canvas.edit`, `canvas.delete`, `workspace.manage`,
   `members.manage`, ...). Today it answers "owner may do everything". Routes and MCP tools never
   check ownership themselves, so orgs and roles later change one function, not every endpoint.
-- **Membership table** `workspace_members(workspace_id, principal_type, principal_id, role)`, where
-  a principal is a user or (later) an org group. A role is a named set of actions.
-  - Built-in roles: owner, editor, commenter, viewer.
+- **Membership table** ✅ (0.8.0, `members.py`) `workspace_members(workspace_id, user_id, role)`.
+  An org-group principal is still open; it would add a `principal_type` column. A role is a named
+  set of actions (`access.ROLES`).
+  - Built-in roles: owner (`workspaces.owner_id`, never a member row), editor, viewer. A commenter
+    role waits for comments to exist.
+  - Owners add an existing user by exact username (✅ user: no pending invites, so no email and no
+    invites table), change their role, or remove them; any member may leave. Removal also drops
+    their folder filing of the workspace and releases edit leases they hold in it. The UI's
+    **Share** dialog lists people for every role and read-only links for owners only; the header,
+    tabs and sidebar hide what a member's role can't do.
   - Custom roles later: a `roles` table holding an action set per org. Org admins pick built-ins or
     define their own.
 - **Organisations** later: `orgs`, `org_members(org, user, org_role)`, and workspaces owned by an
@@ -331,3 +341,19 @@ Public listings of **template packs** and **style guides**: versioned, with auth
 and install count. Installing copies the item into the user's library, so later edits by the author
 don't change installed copies; updates are explicit. Being public, it needs reporting and the ability
 for an admin to unlist items before it is opened up. ⚠ unverified: no abuse/moderation design yet.
+
+## 12. Schema nodes 📐
+
+User direction 2026-10-11 (✅ user): architecture diagrams often link to the schema of a connection
+between apps; nodewright should store that schema **in** the diagram, visible and syntax
+highlighted. Formats to start: Avro, Protobuf, JSON (incl. JSON Schema), YAML. A typed node with a
+parser that reads those files into the element.
+
+Not designed yet. Constraints already known:
+
+- It must stay a valid JSON Canvas file (§3.2): a text node whose body is the schema source, with
+  extra keys for the type, so Obsidian still shows the text.
+- Highlighting and parsing happen in the UI; the stored form is the source text, so a parse
+  failure never loses data.
+- Field-level edges (an edge to one field of a message) need node ports, which come first in the
+  §8 order and are shared with schematics.

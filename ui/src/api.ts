@@ -42,7 +42,12 @@ export type Config = {
 export type Attachment = {
   id: string; name: string; content_type: string; size: number; image: boolean; file: string; url: string;
 };
-export type Workspace = { id: string; name: string; updated_at: string; folder_id?: string | null };
+export type Role = "owner" | "editor" | "viewer";
+export type Workspace = {
+  id: string; name: string; updated_at: string; role: Role; owner: string; folder_id?: string | null;
+};
+export type Member = { user_id: string; username: string; role: Role };
+export type Members = { members: Member[]; assignable: Role[]; can_manage: boolean };
 export type Folder = { id: string; name: string; parent_id: string | null };
 export type ShareLink = { id: string; canvas_id: string; all_tabs: boolean; url: string; created_at: string };
 export type CanvasMeta = {
@@ -97,6 +102,12 @@ export const api = {
   createShare: (canvasId: string, all_tabs: boolean) =>
     call<ShareLink>("POST", `/api/canvases/${canvasId}/shares`, { all_tabs }),
   revokeShare: (id: string) => call("DELETE", `/api/shares/${id}`),
+  members: (wsId: string) => call<Members>("GET", `/api/workspaces/${wsId}/members`),
+  addMember: (wsId: string, username: string, role: Role) =>
+    call<Member>("POST", `/api/workspaces/${wsId}/members`, { username, role }),
+  setMemberRole: (wsId: string, userId: string, role: Role) =>
+    call<Member>("PATCH", `/api/workspaces/${wsId}/members/${userId}`, { role }),
+  removeMember: (wsId: string, userId: string) => call("DELETE", `/api/workspaces/${wsId}/members/${userId}`),
   canvases: (wsId: string) => call<CanvasMeta[]>("GET", `/api/workspaces/${wsId}/canvases`),
   createCanvas: (wsId: string, name: string, data?: JsonCanvas, template?: string) =>
     call<CanvasMeta>("POST", `/api/workspaces/${wsId}/canvases`, { name, data, template }),

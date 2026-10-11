@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.8.0 - 2026-10-11
+
+### Added
+- Workspace members: **Share** now lists who has access. Owners add someone by username (they must
+  have signed in once) as an editor or viewer, change their role or remove them; members can leave.
+  Shared workspaces show in a member's sidebar, marked with the owner; viewers get a read-only
+  editor and no rename, delete, import or new-tab controls. Workspaces carry `role` and `owner`
+  in the API and MCP `list_workspaces`.
+
+### Changed
+- Removing a member releases any edit lease they hold in that workspace, so others can edit at
+  once.
+
 ## 0.7.0 - 2026-10-11
 
 ### Added

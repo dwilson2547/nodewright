@@ -23,7 +23,7 @@ from pydantic import AnyHttpUrl, BaseModel, ConfigDict
 from starlette.routing import Route
 
 from . import (__version__, access, attachments, auth, canvas_format, events, folders, leases,
-               mcp_server, oauth, oidc, render, shares, storage, styleguide, templates, tokens)
+               members, mcp_server, oauth, oidc, render, shares, storage, styleguide, templates, tokens)
 from .config import Settings
 from .db import Database
 from .models import (AccessToken, Attachment, Canvas, CanvasRevision, OAuthGrant, ShareLink, StyleGuide,
@@ -59,6 +59,15 @@ class FileIn(BaseModel):
     folder_id: str | None = None
 
 
+class MemberIn(BaseModel):
+    username: str = Field(min_length=1, max_length=64)
+    role: str = Field(default="editor", max_length=32)
+
+
+class RoleIn(BaseModel):
+    role: str = Field(max_length=32)
+
+
 class ShareIn(BaseModel):
     all_tabs: bool = False
 
@@ -92,8 +101,9 @@ def _iso(dt: datetime) -> str:
     return dt.isoformat()
 
 
-def _ws_out(ws: Workspace) -> dict:
-    return {"id": ws.id, "name": ws.name, "updated_at": _iso(ws.updated_at)}
+def _ws_out(ws: Workspace, role: str = "owner") -> dict:
+    return {"id": ws.id, "name": ws.name, "updated_at": _iso(ws.updated_at), "role": role,
+            "owner": ws.owner.username}
 
 
 def _canvas_meta(c: Canvas) -> dict:
@@ -303,7 +313,7 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
     @app.get("/api/workspaces")
     def list_workspaces(user: User = Depends(user_dep), s: Session = Depends(session)):
         filed = folders.placements(s, user)
-        return [{**_ws_out(w), "folder_id": filed.get(w.id)}
+        return [{**_ws_out(w, access.role_on(s, user, w)), "folder_id": filed.get(w.id)}
                 for w in access.visible_workspaces(s, user)]
 
     @app.put("/api/workspaces/{ws_id}/folder")
@@ -381,6 +391,47 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
         s.delete(ws)
         if store and keys:
             tasks.add_task(drop_objects, keys)
+        return Response(status_code=204)
+
+    # --- workspace members (members.py) --------------------------------------
+
+    def member_error(exc: members.MemberError) -> HTTPException:
+        return HTTPException(exc.status, str(exc))
+
+    @app.get("/api/workspaces/{ws_id}/members")
+    def list_members(ws_id: str, user: User = Depends(user_dep), s: Session = Depends(session)):
+        ws = workspace_for(s, user, ws_id)
+        return {"members": members.listing(s, ws), "assignable": list(members.ASSIGNABLE),
+                "can_manage": access.can(s, user, ws, access.MEMBERS_MANAGE)}
+
+    @app.post("/api/workspaces/{ws_id}/members", status_code=201)
+    def add_member(ws_id: str, body: MemberIn, user: User = Depends(user_dep),
+                   s: Session = Depends(session)):
+        ws = workspace_for(s, user, ws_id, access.MEMBERS_MANAGE)
+        try:
+            return members.add(s, ws, body.username, body.role)
+        except members.MemberError as exc:
+            raise member_error(exc) from None
+
+    @app.patch("/api/workspaces/{ws_id}/members/{user_id}")
+    def set_member_role(ws_id: str, user_id: str, body: RoleIn, user: User = Depends(user_dep),
+                        s: Session = Depends(session)):
+        ws = workspace_for(s, user, ws_id, access.MEMBERS_MANAGE)
+        try:
+            return members.set_role(s, ws, user_id, body.role)
+        except members.MemberError as exc:
+            raise member_error(exc) from None
+
+    @app.delete("/api/workspaces/{ws_id}/members/{user_id}", status_code=204)
+    def remove_member(ws_id: str, user_id: str, user: User = Depends(user_dep),
+                      s: Session = Depends(session)):
+        ws = workspace_for(s, user, ws_id)
+        if not members.may_remove(s, user, ws, user_id):
+            raise HTTPException(403, "you can't do that in this workspace")
+        try:
+            members.remove(s, ws, user_id)
+        except members.MemberError as exc:
+            raise member_error(exc) from None
         return Response(status_code=204)
 
     # --- canvases (tabs) ----------------------------------------------------

@@ -63,26 +63,29 @@ function Tab({ tab, active, onOpen, onRename, onDelete }: {
   tab: CanvasMeta;
   active: boolean;
   onOpen: () => void;
-  onRename: (name: string) => void;
-  onDelete: () => void;
+  onRename?: (name: string) => void;
+  onDelete?: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(tab.name);
   const commit = () => {
     setEditing(false);
     const v = draft.trim();
-    if (v && v !== tab.name) onRename(v);
+    if (v && v !== tab.name) onRename?.(v);
   };
   return (
     <div className={"tab" + (active ? " active" : "")} onClick={onOpen}
-      onDoubleClick={() => { setDraft(tab.name); setEditing(true); }} title="Double-click to rename">
+      onDoubleClick={() => { if (onRename) { setDraft(tab.name); setEditing(true); } }}
+      title={onRename ? "Double-click to rename" : undefined}>
       {editing ? (
         <input autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} onBlur={commit}
           onKeyDown={(e) => { if (e.key === "Enter") commit(); if (e.key === "Escape") setEditing(false); }} />
       ) : (
         <span>{tab.name}</span>
       )}
-      <button className="tab-x" title="Delete tab" onClick={(e) => { e.stopPropagation(); onDelete(); }}>×</button>
+      {onDelete && (
+        <button className="tab-x" title="Delete tab" onClick={(e) => { e.stopPropagation(); onDelete(); }}>×</button>
+      )}
     </div>
   );
 }
@@ -286,6 +289,16 @@ export default function App() {
     await loadWorkspaces(rest[0]?.id);
   };
 
+  // After leaving a shared workspace (ShareDialog): move to another, as for a delete.
+  const leftWorkspace = async () => {
+    setShareOpen(false);
+    const rest = workspaces.filter((w) => w.id !== wsId);
+    if (rest.length === 0) await api.createWorkspace("My workspace").catch(fail);
+    await leave();
+    setTabId(null);
+    await loadWorkspaces(rest[0]?.id);
+  };
+
   const signOut = async () => {
     await leave();
     await api.logout().catch(() => undefined);
@@ -294,6 +307,9 @@ export default function App() {
 
   if (!config || me === undefined) return <div className="center-msg">{error ?? "Loading…"}</div>;
   if (me === null) return <SignIn config={config} onDone={loadMe} />;
+  const ws = workspaces.find((w) => w.id === wsId);
+  const owner = ws?.role === "owner";
+  const editable = owner || ws?.role === "editor";
 
   return (
     <div className="app">
@@ -301,19 +317,21 @@ export default function App() {
         <button className="sb-toggle" onClick={toggleSidebar} title={sidebar ? "Hide workspaces" : "Show workspaces"}
           aria-label="Toggle workspaces">☰</button>
         <strong className="brand">nodewright</strong>
-        <span className="ws-name">{workspaces.find((w) => w.id === wsId)?.name}</span>
-        <button onClick={renameWorkspace} title="Rename workspace">Rename</button>
-        <button onClick={deleteWorkspace} title="Delete workspace">Delete</button>
+        <span className="ws-name">{ws?.name}</span>
+        {ws && !owner && <span className="muted" title={`Shared with you by ${ws.owner}`}>{ws.role} · {ws.owner}</span>}
+        {owner && <button onClick={renameWorkspace} title="Rename workspace">Rename</button>}
+        {owner && <button onClick={deleteWorkspace} title="Delete workspace">Delete</button>}
         <span className="grow" />
         <span className={"status s-" + status}>{STATUS_TEXT[status]}</span>
-        <button onClick={() => fileInput.current?.click()} title="Open a .canvas file as a new tab">Import</button>
+        {editable && <button onClick={() => fileInput.current?.click()} title="Open a .canvas file as a new tab">Import</button>}
         <button onClick={exportTab} title="Download this tab as a .canvas file">Export</button>
         <input ref={fileInput} type="file" accept=".canvas,application/json" hidden onChange={(e) => {
           const f = e.target.files?.[0];
           e.target.value = "";
           if (f) void importFile(f);
         }} />
-        <button onClick={() => setShareOpen(true)} disabled={!tabId} title="Read-only links anyone can open">Share</button>
+        <button onClick={() => setShareOpen(true)} disabled={!ws}
+          title={owner ? "Members and read-only links" : "Who has access"}>Share</button>
         <button onClick={() => setSettingsOpen(true)} title="Access tokens and style guide for AI agents (MCP)">Agents</button>
         <span className="muted">{me.username}</span>
         <button onClick={signOut}>Sign out</button>
@@ -334,9 +352,10 @@ export default function App() {
       <nav className="tabs">
         {tabs.map((t) => (
           <Tab key={t.id} tab={t} active={t.id === tabId} onOpen={() => void openTab(t.id)}
-            onRename={(n) => void renameTab(t, n)} onDelete={() => void deleteTab(t)} />
+            onRename={editable ? (n) => void renameTab(t, n) : undefined}
+            onDelete={editable ? () => void deleteTab(t) : undefined} />
         ))}
-        <button className="tab-add" onClick={newTab} title="New tab">+</button>
+        {editable && <button className="tab-add" onClick={newTab} title="New tab">+</button>}
       </nav>
       {error && (
         <div className="error-bar">
@@ -357,9 +376,9 @@ export default function App() {
       </div>
       </div>
       {settingsOpen && <AgentSettings onClose={() => setSettingsOpen(false)} />}
-      {shareOpen && tabId && (
-        <ShareDialog canvasId={tabId} canvasName={tabs.find((t) => t.id === tabId)?.name ?? ""}
-          onClose={() => setShareOpen(false)} />
+      {shareOpen && ws && (
+        <ShareDialog workspace={ws} canvasId={tabId} canvasName={tabs.find((t) => t.id === tabId)?.name ?? ""}
+          me={me.username} onClose={() => setShareOpen(false)} onLeft={() => void leftWorkspace()} />
       )}
     </div>
   );

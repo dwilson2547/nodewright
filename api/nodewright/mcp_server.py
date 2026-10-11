@@ -131,12 +131,13 @@ def build(db: Database, settings: Settings, store: storage.Store | None = None,
     @server.tool()
     def list_workspaces(ctx: Context) -> dict:
         """Workspaces you can see, each with its canvases (tabs): ids, names,
-        revisions and node/edge counts; plus the user's folders (folder_id
-        null = top level)."""
+        revisions and node/edge counts, and your role (owner, editor, viewer);
+        plus the user's folders (folder_id null = top level)."""
         def go(s, user, who):
             filed = folders.placements(s, user)
             return {"folders": [folders.out(f) for f in folders.all_for(s, user)],
                     "workspaces": [{"id": ws.id, "name": ws.name, "folder_id": filed.get(ws.id),
+                                    "role": access.role_on(s, user, ws),
                                     "canvases": [ops.summary(c) for c in ws.canvases]}
                                    for ws in access.visible_workspaces(s, user)]}
         return run(ctx, go)

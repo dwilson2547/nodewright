@@ -125,8 +125,8 @@ class CanvasRevision(Base):
 
 class WorkspaceMember(Base):
     """Someone other than the owner with a role on a workspace (design §11.1).
-    The owner is `workspaces.owner_id` and has no row here. Nothing writes these
-    yet; access.authorize() already reads them, so sharing adds rows, not checks."""
+    The owner is `workspaces.owner_id` and has no row here. Written by members.py;
+    access.py reads them."""
     __tablename__ = "workspace_members"
     __table_args__ = (UniqueConstraint("workspace_id", "user_id"),)
 

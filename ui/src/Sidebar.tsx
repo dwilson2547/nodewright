@@ -98,9 +98,11 @@ export function Sidebar({ folders, workspaces, current, act }: {
 
   const wsRow = (w: Workspace, depth: number) => (
     <div key={w.id} className={"sb-row sb-ws" + (w.id === current ? " active" : "")}
-      style={{ paddingLeft: 10 + depth * 14 }} onClick={() => act.open(w.id)} title={w.name}
+      style={{ paddingLeft: 10 + depth * 14 }} onClick={() => act.open(w.id)}
+      title={w.role === "owner" ? w.name : `${w.name} — shared by ${w.owner} (${w.role})`}
       {...dragging({ kind: "ws", id: w.id })}>
       <span className="sb-name">{w.name}</span>
+      {w.role !== "owner" && <span className="sb-shared" aria-label="shared with you">⇄</span>}
     </div>
   );
 
