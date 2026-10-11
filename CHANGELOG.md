@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.1 - 2026-10-11
+
+### Fixed
+- An agent write no longer shortens its own `lock_canvas` lock: the implicit 2-minute renewal
+  now keeps the later expiry, so `lock_canvas(minutes=10)` followed by edits holds for 10.
+
 ## 0.4.0 - 2026-10-11
 
 ### Added

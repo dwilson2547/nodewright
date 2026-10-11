@@ -151,6 +151,16 @@ def test_agent_lock_blocks_ui_until_released(mcp):
     assert "locked" in m.error("add_elements", canvas_id=tab["id"], nodes=[{"text": "x"}])
 
 
+def test_write_does_not_shorten_explicit_agent_lock(mcp):
+    m, web = mcp
+    _, tab = first_canvas(web)
+    m.call("lock_canvas", canvas_id=tab["id"], minutes=10)
+    m.call("add_elements", canvas_id=tab["id"], nodes=[{"text": "x"}])
+    lock = m.call("get_canvas", canvas_id=tab["id"])["lock"]
+    assert lock["seconds_left"] > 500
+    assert m.call("lock_canvas", canvas_id=tab["id"], minutes=1)["lock"]["seconds_left"] <= 60
+
+
 def test_expired_lease_is_ignored(client, app_and_provider):
     app, _ = app_and_provider
     _, tab = first_canvas(client)

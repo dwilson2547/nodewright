@@ -86,6 +86,9 @@ def take(s: Session, canvas_id: str, who: Holder, ttl: timedelta | None = None,
                 raise Locked(raced) from None
             return take(s, canvas_id, who, ttl, force)
     else:
+        if not fresh and ttl is None:
+            # A write's implicit renewal must not cut short a longer lock_canvas.
+            expires = max(expires, _aware(row.expires_at))
         row.holder, row.kind, row.user_id = who.key, who.kind, who.user.id
         row.label, row.expires_at = who.label[:160], expires
     if fresh:
