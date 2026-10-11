@@ -169,3 +169,28 @@ input[type="color"] { width: 24px; height: 22px; padding: 0; border: none; backg
 .nw-download { color: var(--accent); text-decoration: none; overflow-wrap: anywhere; }
 .nw-download:hover { text-decoration: underline; }
 .editor.drop-files::after { content: "Drop to upload"; position: absolute; inset: 8px; border: 2px dashed var(--accent); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 18px; color: var(--accent); background: #7852ee10; pointer-events: none; z-index: 10; }
+
+/* workspace sidebar (Sidebar.tsx) */
+.body { flex: 1; display: flex; min-height: 0; }
+.work { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.ws-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 30vw; }
+.sb-toggle { padding: 2px 8px; }
+.sidebar { width: 230px; flex: none; display: flex; flex-direction: column; background: var(--panel); border-right: 1px solid var(--border); font-size: 13px; }
+.sidebar.over { box-shadow: inset 0 0 0 2px var(--accent); }
+.sb-head { display: flex; align-items: center; gap: 4px; padding: 8px 8px 6px 10px; font-weight: 600; }
+.sb-list { flex: 1; overflow-y: auto; padding-bottom: 24px; }
+.sb-row { position: relative; display: flex; align-items: center; gap: 4px; padding: 4px 6px; cursor: pointer; user-select: none; border-radius: 4px; margin: 0 4px; }
+.sb-row:hover { background: color-mix(in srgb, var(--fg) 7%, transparent); }
+.sb-ws.active { background: color-mix(in srgb, var(--accent) 18%, transparent); font-weight: 600; }
+.sb-folder.over { box-shadow: inset 0 0 0 2px var(--accent); }
+.sb-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-caret { width: 12px; flex: none; color: var(--muted, #888); }
+.sb-empty { cursor: default; font-style: italic; }
+.sb-empty:hover { background: none; }
+.sb-btn { padding: 0 6px; font-size: 12px; line-height: 18px; white-space: nowrap; flex: none; border: none; background: none; }
+.sb-row .sb-btn { opacity: 0; }
+.sb-row:hover .sb-btn { opacity: 1; }
+.sb-btn:hover { background: color-mix(in srgb, var(--fg) 12%, transparent); }
+.sb-menu { position: absolute; right: 4px; top: 100%; z-index: 20; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 4px 16px rgb(0 0 0 / .2); padding: 4px; }
+.sb-menu button { text-align: left; border: none; background: none; padding: 4px 10px; white-space: nowrap; }
+.sb-menu button:hover { background: color-mix(in srgb, var(--accent) 18%, transparent); }

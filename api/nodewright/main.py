@@ -22,7 +22,7 @@ from mcp.server.auth.settings import ClientRegistrationOptions, RevocationOption
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict
 from starlette.routing import Route
 
-from . import (__version__, access, attachments, auth, canvas_format, events, leases,
+from . import (__version__, access, attachments, auth, canvas_format, events, folders, leases,
                mcp_server, oauth, oidc, render, storage, styleguide, templates, tokens)
 from .config import Settings
 from .db import Database
@@ -43,6 +43,20 @@ NEXT_COOKIE = "nw_next"
 
 class NameIn(BaseModel):
     name: str = Field(min_length=1, max_length=200)
+
+
+class FolderIn(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    parent_id: str | None = None
+
+
+class FolderPatch(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    parent_id: str | None = None  # only applied when sent; null = top level
+
+
+class FileIn(BaseModel):
+    folder_id: str | None = None
 
 
 class CanvasCreate(BaseModel):
@@ -284,7 +298,56 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
 
     @app.get("/api/workspaces")
     def list_workspaces(user: User = Depends(user_dep), s: Session = Depends(session)):
-        return [_ws_out(w) for w in access.visible_workspaces(s, user)]
+        filed = folders.placements(s, user)
+        return [{**_ws_out(w), "folder_id": filed.get(w.id)}
+                for w in access.visible_workspaces(s, user)]
+
+    @app.put("/api/workspaces/{ws_id}/folder")
+    def file_workspace(ws_id: str, body: FileIn, user: User = Depends(user_dep),
+                       s: Session = Depends(session)):
+        try:
+            folders.file(s, user, ws_id, body.folder_id)
+        except access.Denied as exc:
+            raise access.http(exc) from None
+        except folders.FolderError as exc:
+            raise HTTPException(exc.status, str(exc)) from None
+        return {"workspace_id": ws_id, "folder_id": body.folder_id}
+
+    # --- folders (folders.py) -----------------------------------------------
+
+    @app.get("/api/folders")
+    def list_folders(user: User = Depends(user_dep), s: Session = Depends(session)):
+        return {"folders": [folders.out(f) for f in folders.all_for(s, user)]}
+
+    @app.post("/api/folders", status_code=201)
+    def create_folder(body: FolderIn, user: User = Depends(user_dep),
+                      s: Session = Depends(session)):
+        try:
+            return folders.out(folders.create(s, user, body.name, body.parent_id))
+        except folders.FolderError as exc:
+            raise HTTPException(exc.status, str(exc)) from None
+
+    @app.patch("/api/folders/{folder_id}")
+    def patch_folder(folder_id: str, body: FolderPatch, user: User = Depends(user_dep),
+                     s: Session = Depends(session)):
+        try:
+            f = folders.get(s, user, folder_id)
+            if body.name is not None:
+                f.name = body.name.strip()
+            if "parent_id" in body.model_fields_set:
+                folders.move(s, user, f, body.parent_id)
+        except folders.FolderError as exc:
+            raise HTTPException(exc.status, str(exc)) from None
+        return folders.out(f)
+
+    @app.delete("/api/folders/{folder_id}", status_code=204)
+    def delete_folder(folder_id: str, user: User = Depends(user_dep),
+                      s: Session = Depends(session)):
+        try:
+            folders.remove(s, user, folders.get(s, user, folder_id))
+        except folders.FolderError as exc:
+            raise HTTPException(exc.status, str(exc)) from None
+        return Response(status_code=204)
 
     @app.post("/api/workspaces", status_code=201)
     def create_workspace(body: NameIn, user: User = Depends(user_dep),

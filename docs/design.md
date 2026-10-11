@@ -162,8 +162,9 @@ Built in 0.2.0 (✅ verified with the MCP Python SDK client against a local serv
 
 | Tool | Purpose |
 |---|---|
-| `list_workspaces` | Discovery: workspaces with their canvases |
-| `create_workspace`, `create_canvas` | New workspace / tab (returns a `/?canvas=` link) |
+| `list_workspaces` | Discovery: workspaces with their canvases, plus the user's folders (0.7.0) |
+| `create_workspace`, `create_canvas` | New workspace (optionally into a folder) / tab (returns a `/?canvas=` link) |
+| `create_folder`, `file_workspace` | Organise workspaces into the user's folders, §11.2 (0.7.0) |
 | `get_canvas` | Full JSON Canvas + revision + current lock |
 | `add_elements` | Nodes and edges in one call; agent-chosen ids; `group` to nest; positions optional |
 | `update_elements`, `delete_elements` | Batch edit by id (`null` removes a key; `fit` resizes to text) |
@@ -210,8 +211,8 @@ of editor polish.
 2. ✅ (0.2.0) **Agents:** personal access tokens, the §7 tool set, layout engine, live push to open tabs (SSE),
    edit leases (§11.3), style guides (§11.4).
 3. ✅ (0.4.0) **Editor:** shapes and edge line styles (§3.2), templates and default pages (§4),
-   tab links and attachments (§3.3). Folders (§11.2) deferred: they are the first change to an
-   existing table, so they wait for Alembic (needs the user's go-ahead).
+   tab links and attachments (§3.3). Folders (§11.2) followed in 0.7.0 with Alembic (✅ user
+   approved the migration).
 4. **Sharing:** read-only share links, workspace members, organisations with built-in roles (§11.1).
 5. **Stretch:** marketplace (§11.5), custom roles, workspace zip import/export.
 
@@ -263,14 +264,28 @@ several people's agents don't fight over one document.
 - **Organisations** later: `orgs`, `org_members(org, user, org_role)`, and workspaces owned by an
   org. Optional mapping from an authentik group claim to org membership/role at sign-in, the same
   way dxf-converter maps its admin group.
-- Additive tables only, so `create_all` still works until Alembic is introduced. The first
-  *changed* column (not a new table) is the trigger to set up Alembic.
+- Schema changes are Alembic migrations (`api/nodewright/migrations/`, 0.7.0). `db.migrate()` runs
+  at startup; a database made by the old `create_all` is stamped at the `0001` baseline first.
 
-### 11.2 Folders
+### 11.2 Folders ✅ (0.7.0)
 
-A workspace holds a tree of folders (`folders(id, workspace_id, parent_id, name, position)`), and a
-canvas gets a nullable `folder_id`. Tabs become "open canvases" rather than "every canvas in the
-workspace". Permissions stay at the workspace level, not per folder (avoids ACL inheritance).
+Built differently from the first sketch (folders of canvases inside a workspace): folders hold
+**workspaces**, and each user has their own tree. A workspace's tabs already group its canvases, so
+the missing layer was above the workspace, and per-user placement stays correct once workspaces are
+shared: a member files a shared workspace wherever they like without moving it for the owner.
+
+- `folders(id, owner_id, parent_id → folders ON DELETE CASCADE, name, created_at)`;
+  `workspace_folders(user_id, workspace_id, folder_id ON DELETE CASCADE)`, primary key
+  (user, workspace). No row means top level. Migration `0002_folders`.
+- Deleting a folder deletes its subfolders; the workspaces in them go back to the top level and are
+  never deleted. Moves reject cycles. Limits: depth 8, 500 folders per user.
+- Folders carry no permissions; access stays at the workspace (avoids ACL inheritance). Filing a
+  workspace needs read access to it.
+- REST: `GET/POST /api/folders`, `PATCH/DELETE /api/folders/{id}`, `PUT /api/workspaces/{id}/folder`;
+  `GET /api/workspaces` includes each workspace's `folder_id`. MCP: `list_workspaces` returns the
+  folders, plus `create_folder`, `file_workspace`, and `create_workspace(folder_id=)`.
+- UI: a collapsible left sidebar replaces the header workspace picker. Drag a workspace or folder
+  onto a folder to file it, or onto the sidebar header/background for the top level.
 
 ### 11.3 Edit leases (server-side lock)
 

@@ -42,7 +42,8 @@ export type Config = {
 export type Attachment = {
   id: string; name: string; content_type: string; size: number; image: boolean; file: string; url: string;
 };
-export type Workspace = { id: string; name: string; updated_at: string };
+export type Workspace = { id: string; name: string; updated_at: string; folder_id?: string | null };
+export type Folder = { id: string; name: string; parent_id: string | null };
 export type CanvasMeta = {
   id: string;
   workspace_id: string;
@@ -82,6 +83,14 @@ export const api = {
   createWorkspace: (name: string) => call<Workspace>("POST", "/api/workspaces", { name }),
   renameWorkspace: (id: string, name: string) => call<Workspace>("PATCH", `/api/workspaces/${id}`, { name }),
   deleteWorkspace: (id: string) => call("DELETE", `/api/workspaces/${id}`),
+  fileWorkspace: (id: string, folder_id: string | null) =>
+    call("PUT", `/api/workspaces/${id}/folder`, { folder_id }),
+  folders: () => call<{ folders: Folder[] }>("GET", "/api/folders").then((r) => r.folders),
+  createFolder: (name: string, parent_id: string | null) =>
+    call<Folder>("POST", "/api/folders", { name, parent_id }),
+  patchFolder: (id: string, patch: { name?: string; parent_id?: string | null }) =>
+    call<Folder>("PATCH", `/api/folders/${id}`, patch),
+  deleteFolder: (id: string) => call("DELETE", `/api/folders/${id}`),
   canvases: (wsId: string) => call<CanvasMeta[]>("GET", `/api/workspaces/${wsId}/canvases`),
   createCanvas: (wsId: string, name: string, data?: JsonCanvas, template?: string) =>
     call<CanvasMeta>("POST", `/api/workspaces/${wsId}/canvases`, { name, data, template }),

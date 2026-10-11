@@ -21,7 +21,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.streamable_http_manager import StreamableHTTPASGIApp
 from mcp.server.transport_security import TransportSecuritySettings
 
-from . import (__version__, access, attachments, canvas_format, leases, ops, render, storage,
+from . import (__version__, access, attachments, canvas_format, folders, leases, ops, render, storage,
                styleguide, styles, templates, tokens)
 from .config import Settings
 from .db import Database
@@ -119,7 +119,7 @@ def build(db: Database, settings: Settings, store: storage.Store | None = None,
             except leases.Locked as exc:
                 raise ToolError(f"canvas is locked: {exc}. Wait for it to free up, or ask "
                                 "the user.") from None
-            except (ops.OpError, canvas_format.CanvasError) as exc:
+            except (ops.OpError, canvas_format.CanvasError, folders.FolderError) as exc:
                 raise ToolError(str(exc)) from None
 
     def write(ctx: Context, canvas_id: str, op) -> dict:
@@ -131,21 +131,42 @@ def build(db: Database, settings: Settings, store: storage.Store | None = None,
     @server.tool()
     def list_workspaces(ctx: Context) -> dict:
         """Workspaces you can see, each with its canvases (tabs): ids, names,
-        revisions and node/edge counts."""
+        revisions and node/edge counts; plus the user's folders (folder_id
+        null = top level)."""
         def go(s, user, who):
-            return {"workspaces": [{"id": ws.id, "name": ws.name,
+            filed = folders.placements(s, user)
+            return {"folders": [folders.out(f) for f in folders.all_for(s, user)],
+                    "workspaces": [{"id": ws.id, "name": ws.name, "folder_id": filed.get(ws.id),
                                     "canvases": [ops.summary(c) for c in ws.canvases]}
                                    for ws in access.visible_workspaces(s, user)]}
         return run(ctx, go)
 
     @server.tool()
-    def create_workspace(ctx: Context, name: Annotated[str, Field(min_length=1, max_length=200)]
-                         ) -> dict:
-        """Create a workspace with one empty canvas."""
+    def create_folder(ctx: Context, name: Annotated[str, Field(min_length=1, max_length=200)],
+                      parent_id: str | None = None) -> dict:
+        """Create a folder for organising workspaces, optionally inside another."""
+        return run(ctx, lambda s, user, who: folders.out(folders.create(s, user, name, parent_id)))
+
+    @server.tool()
+    def file_workspace(ctx: Context, workspace_id: str, folder_id: str | None) -> dict:
+        """Move a workspace into one of the user's folders (null = top level)."""
         def go(s, user, who):
+            folders.file(s, user, workspace_id, folder_id)
+            return {"workspace_id": workspace_id, "folder_id": folder_id}
+        return run(ctx, go)
+
+    @server.tool()
+    def create_workspace(ctx: Context, name: Annotated[str, Field(min_length=1, max_length=200)],
+                         folder_id: str | None = None) -> dict:
+        """Create a workspace with one empty canvas, optionally in a folder."""
+        def go(s, user, who):
+            if folder_id:
+                folders.get(s, user, folder_id)
             ws = Workspace(owner_id=user.id, name=name.strip())
             s.add(ws)
             s.flush()
+            if folder_id:
+                folders.file(s, user, ws.id, folder_id)
             c = Canvas(workspace_id=ws.id, name="Untitled", position=0, revision=1,
                        data=templates.page_data(s, user, None))
             s.add(c)

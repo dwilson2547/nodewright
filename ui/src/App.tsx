@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ReactFlowProvider } from "@xyflow/react";
-import { api, ApiError, type CanvasMeta, type Config, type Me, type Workspace } from "./api";
+import { api, ApiError, type CanvasMeta, type Config, type Folder, type Me, type Workspace } from "./api";
 import { Editor, type EditorHandle, type SaveStatus } from "./Editor";
 import { AgentSettings } from "./Settings";
+import { Sidebar } from "./Sidebar";
 import { TabLinksContext } from "./tablinks";
 
 const STATUS_TEXT: Record<SaveStatus, string> = {
@@ -89,6 +90,8 @@ export default function App() {
   const [config, setConfig] = useState<Config | null>(null);
   const [me, setMe] = useState<Me | null | undefined>(undefined);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [folders, setFolders] = useState<Folder[]>([]);
+  const [sidebar, setSidebar] = useState(() => localStorage.getItem("nw.sidebar") !== "0");
   const [wsId, setWsId] = useState<string | null>(null);
   const [tabs, setTabs] = useState<CanvasMeta[]>([]);
   const [tabId, setTabId] = useState<string | null>(null);
@@ -112,8 +115,9 @@ export default function App() {
   }, [loadMe]);
 
   const loadWorkspaces = useCallback(async (prefer?: string) => {
-    const list = await api.workspaces();
+    const [list, fs] = await Promise.all([api.workspaces(), api.folders()]);
     setWorkspaces(list);
+    setFolders(fs);
     if (!prefer && linked.current) {
       const c = await api.canvas(linked.current).catch(() => null);
       if (c) {
@@ -212,16 +216,55 @@ export default function App() {
     if (doc && t) download(t.name, JSON.stringify(doc, null, "\t"));
   };
 
-  const newWorkspace = async () => {
+  const newWorkspace = async (folderId: string | null = null) => {
     const name = prompt("Name for the new workspace", "New workspace")?.trim();
     if (!name) return;
     await leave();
     const w = await api.createWorkspace(name).catch(fail);
     if (w) {
+      if (folderId) await api.fileWorkspace(w.id, folderId).catch(fail);
       setTabId(null);
       await loadWorkspaces(w.id);
     }
   };
+
+  const refreshTree = () => loadWorkspaces(wsId ?? undefined).catch(fail);
+
+  const newFolder = async (parentId: string | null) => {
+    const name = prompt("Folder name", "New folder")?.trim();
+    if (!name) return;
+    await api.createFolder(name, parentId).catch(fail);
+    await refreshTree();
+  };
+
+  const renameFolder = async (f: Folder) => {
+    const name = prompt("Rename folder", f.name)?.trim();
+    if (!name || name === f.name) return;
+    await api.patchFolder(f.id, { name }).catch(fail);
+    await refreshTree();
+  };
+
+  const deleteFolder = async (f: Folder) => {
+    if (!confirm(`Delete folder "${f.name}" and its subfolders? Workspaces in them move to the top level; none are deleted.`)) return;
+    await api.deleteFolder(f.id).catch(fail);
+    await refreshTree();
+  };
+
+  const fileWorkspace = async (id: string, folderId: string | null) => {
+    setWorkspaces((ws) => ws.map((w) => (w.id === id ? { ...w, folder_id: folderId } : w)));
+    await api.fileWorkspace(id, folderId).catch(fail);
+    await refreshTree();
+  };
+
+  const moveFolder = async (id: string, parentId: string | null) => {
+    await api.patchFolder(id, { parent_id: parentId }).catch(fail);
+    await refreshTree();
+  };
+
+  const toggleSidebar = () => setSidebar((v) => {
+    localStorage.setItem("nw.sidebar", v ? "0" : "1");
+    return !v;
+  });
 
   const renameWorkspace = async () => {
     const ws = workspaces.find((w) => w.id === wsId);
@@ -253,14 +296,10 @@ export default function App() {
   return (
     <div className="app">
       <header>
+        <button className="sb-toggle" onClick={toggleSidebar} title={sidebar ? "Hide workspaces" : "Show workspaces"}
+          aria-label="Toggle workspaces">☰</button>
         <strong className="brand">nodewright</strong>
-        <select value={wsId ?? ""} aria-label="Workspace" onChange={(e) => {
-          if (e.target.value === "__new") void newWorkspace();
-          else void switchWorkspace(e.target.value);
-        }}>
-          {workspaces.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
-          <option value="__new">+ New workspace…</option>
-        </select>
+        <span className="ws-name">{workspaces.find((w) => w.id === wsId)?.name}</span>
         <button onClick={renameWorkspace} title="Rename workspace">Rename</button>
         <button onClick={deleteWorkspace} title="Delete workspace">Delete</button>
         <span className="grow" />
@@ -276,6 +315,19 @@ export default function App() {
         <span className="muted">{me.username}</span>
         <button onClick={signOut}>Sign out</button>
       </header>
+      <div className="body">
+      {sidebar && (
+        <Sidebar folders={folders} workspaces={workspaces} current={wsId} act={{
+          open: (id) => { if (id !== wsId) void switchWorkspace(id); },
+          newWorkspace: (f) => void newWorkspace(f),
+          newFolder: (p) => void newFolder(p),
+          renameFolder: (f) => void renameFolder(f),
+          deleteFolder: (f) => void deleteFolder(f),
+          fileWorkspace: (w, f) => void fileWorkspace(w, f),
+          moveFolder: (f, p) => void moveFolder(f, p),
+        }} />
+      )}
+      <div className="work">
       <nav className="tabs">
         {tabs.map((t) => (
           <Tab key={t.id} tab={t} active={t.id === tabId} onOpen={() => void openTab(t.id)}
@@ -299,6 +351,8 @@ export default function App() {
           </TabLinksContext.Provider>
         )}
       </main>
+      </div>
+      </div>
       {settingsOpen && <AgentSettings onClose={() => setSettingsOpen(false)} />}
     </div>
   );

@@ -283,3 +283,31 @@ class Attachment(Base):
     @property
     def key(self) -> str:
         return f"attachments/{self.workspace_id}/{self.id}"
+
+
+class Folder(Base):
+    """A user's folder for organising workspaces (design §3.4). Folders are
+    personal: they nest (parent_id) and hold workspaces through
+    workspace_folders, so a shared workspace can sit in a different folder for
+    each person who sees it. Deleting a folder deletes its subfolders and puts
+    their workspaces back at the top level; it never deletes a workspace."""
+    __tablename__ = "folders"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    parent_id: Mapped[str | None] = mapped_column(
+        ForeignKey("folders.id", ondelete="CASCADE"), nullable=True, index=True)
+    name: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class WorkspaceFolder(Base):
+    """Which of a user's folders a workspace is filed in; no row = top level."""
+    __tablename__ = "workspace_folders"
+
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), primary_key=True)
+    folder_id: Mapped[str] = mapped_column(
+        ForeignKey("folders.id", ondelete="CASCADE"), index=True)
