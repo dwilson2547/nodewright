@@ -4,6 +4,7 @@ The zip is laid out so that, unpacked, the folder opens as an Obsidian vault:
 
     <tab name>.canvas                       one per tab, in tab order
     attachments/<id>/<name>                 every attachment a tab shows
+    icons/<id>/<name>.svg                   every icon a tab shows (icons.py)
     .nodewright/workspace.json              name, tab order, version (for a later import)
 
 Canvases are written unchanged: file nodes already point at
@@ -23,7 +24,7 @@ from collections.abc import Iterator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from . import __version__, attachments
+from . import __version__, attachments, icons
 from .models import Attachment, Canvas, Workspace
 from .storage import Store
 
@@ -63,6 +64,17 @@ def build(s: Session, ws: Workspace, store: Store | None) -> Iterator[bytes]:
         select(Attachment).where(Attachment.workspace_id == ws.id, Attachment.id.in_(used))
         .order_by(Attachment.created_at)))
 
+    # Icons the tabs show, by the vault path each node uses (icons.py).
+    icon_files: dict[str, str] = {}
+    for c in tabs:
+        for n in c.data.get("nodes", []):
+            ref = n.get("icon") if isinstance(n, dict) else None
+            icon_id = icons.id_of(ref) if isinstance(ref, str) else None
+            if icon_id and ref not in icon_files:
+                svg = icons.svg_for(s, icon_id)
+                if svg is not None:
+                    icon_files[ref] = svg
+
     buf = tempfile.SpooledTemporaryFile(max_size=SPOOL_BYTES)
     missing = []
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -78,6 +90,8 @@ def build(s: Session, ws: Workspace, store: Store | None) -> Iterator[bytes]:
             with zf.open(zipfile.ZipInfo(attachments.node_file(a)), "w") as out:
                 for chunk in chunks:
                     out.write(chunk)
+        for ref, svg in icon_files.items():
+            zf.writestr(ref, svg)
         zf.writestr(MANIFEST, json.dumps({
             "nodewright": __version__, "workspace": ws.name,
             "tabs": [{"name": c.name, "file": n} for c, n in zip(tabs, names)],

@@ -17,7 +17,7 @@ from typing import Callable
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 
-from . import access, canvas_format, events, leases, layout, ports, styles
+from . import access, canvas_format, events, icons, leases, layout, ports, styles
 from .layout import GRID, GROUP_PAD, NODE_GAP, RANK_GAP, snap
 from .models import Canvas, CanvasRevision, User, utcnow
 
@@ -216,6 +216,7 @@ def _clean_node(raw: dict, ids: set[str]) -> dict:
             n["ports"] = ports.check(n["ports"], "node")
         except ValueError as exc:
             raise OpError(str(exc)) from None
+    _check_icon(n)
     if "id" in n:
         if not isinstance(n["id"], str) or not n["id"] or n["id"] in ids:
             raise OpError(f"node id {n.get('id')!r} is empty or already used")
@@ -223,6 +224,12 @@ def _clean_node(raw: dict, ids: set[str]) -> dict:
         n["id"] = new_id()
     ids.add(n["id"])
     return n
+
+
+def _check_icon(n: dict) -> None:
+    if "icon" in n and (n.get("type") != "text" or icons.id_of(n["icon"]) is None):
+        raise OpError("icon goes on a text node and must be a `file` from list_icons "
+                      "('icons/<id>/<name>.svg')")
 
 
 def _clean_edge(raw: dict, ids: set[str]) -> dict:
@@ -419,6 +426,8 @@ def update_elements(updates: list[dict]):
                     target.pop(k, None)
                 else:
                     target[k] = v
+            if "icon" in u["set"] and u["set"]["icon"] is not None:
+                _check_icon(target)
             if u.get("fit") and "type" in target and target["type"] != "group":
                 target["width"], target["height"] = auto_size(target)
             changed.append(target["id"])

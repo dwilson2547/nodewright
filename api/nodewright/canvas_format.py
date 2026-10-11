@@ -95,6 +95,7 @@ def validate(doc) -> dict:
                 raise CanvasError(str(exc)) from None
         if node["type"] == "text":
             _str(node, "text", where, required=True)
+            _str(node, "icon", where)
         elif node["type"] == "file":
             _str(node, "file", where, required=True)
             _str(node, "subpath", where)

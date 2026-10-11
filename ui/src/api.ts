@@ -1,3 +1,5 @@
+import type { Port } from "./ports";
+
 // Every write carries X-Nodewright: the server's CSRF guard (api/nodewright/auth.py).
 
 export class ApiError extends Error {
@@ -45,6 +47,9 @@ export type Attachment = {
 export type Role = "owner" | "editor" | "viewer";
 export type Workspace = {
   id: string; name: string; updated_at: string; role: Role; owner: string; folder_id?: string | null;
+};
+export type Icon = {
+  id: string; name: string; file: string; url: string; tinted: boolean; ports: Port[]; builtin: boolean;
 };
 export type Member = { user_id: string; username: string; role: Role };
 export type Members = { members: Member[]; assignable: Role[]; can_manage: boolean };
@@ -102,6 +107,12 @@ export const api = {
   createShare: (canvasId: string, all_tabs: boolean) =>
     call<ShareLink>("POST", `/api/canvases/${canvasId}/shares`, { all_tabs }),
   revokeShare: (id: string) => call("DELETE", `/api/shares/${id}`),
+  icons: () => call<{ builtin: Icon[]; mine: Icon[] }>("GET", "/api/icons"),
+  createIcon: (body: { name: string; svg: string; tinted: boolean; ports?: Port[] }) =>
+    call<Icon>("POST", "/api/icons", body),
+  patchIcon: (id: string, body: Partial<{ name: string; svg: string; tinted: boolean; ports: Port[] }>) =>
+    call<Icon>("PATCH", `/api/icons/${id}`, body),
+  deleteIcon: (id: string) => call("DELETE", `/api/icons/${id}`),
   members: (wsId: string) => call<Members>("GET", `/api/workspaces/${wsId}/members`),
   addMember: (wsId: string, username: string, role: Role) =>
     call<Member>("POST", `/api/workspaces/${wsId}/members`, { username, role }),

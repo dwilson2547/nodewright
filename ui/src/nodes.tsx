@@ -2,6 +2,7 @@ import { createContext, memo, useContext, useEffect, useRef, useState, type CSSP
 import { Handle, NodeResizer, Position, useReactFlow, useUpdateNodeInternals, type NodeProps } from "@xyflow/react";
 import { resolveColor, type CNode } from "./canvasMapping";
 import { Markdown, safeUrl } from "./markdown";
+import { iconUrl } from "./icons";
 import { portHandle, portsOf, type Port } from "./ports";
 import { attr } from "./styles";
 import { attachmentOf, TabLinksContext, isCanvasFile, linkTarget, subpathNode } from "./tablinks";
@@ -128,13 +129,33 @@ function Editor({ value, onChange, onCommit, onCancel, multiline }: {
   return multiline ? <textarea {...props} /> : <input {...props} />;
 }
 
+// A text node's icon (icons.ts): a mask filled with the node's colour, or the
+// SVG in its own colours (styleAttributes.iconColors = "original"). Either
+// way an image, never inline markup.
+function IconView({ raw }: { raw: Record<string, any> }) {
+  const url = iconUrl(raw.icon);
+  const [broken, setBroken] = useState(false);
+  if (!url) return null;
+  if (broken) return <div className="nw-icon missing" title={String(raw.icon)}>missing icon</div>;
+  if (attr(raw, "iconColors") === "original") {
+    return <img className="nw-icon" src={url} alt="" draggable={false} onError={() => setBroken(true)} />;
+  }
+  const mask = `url("${url}") center / contain no-repeat`;
+  return (
+    <div className="nw-icon tinted" style={{ mask, WebkitMask: mask }} aria-hidden="true">
+      <img src={url} alt="" hidden onError={() => setBroken(true)} />
+    </div>
+  );
+}
+
 export const TextNode = memo(({ id, data, selected }: NodeProps<CNode>) => {
   const raw = data.raw;
   const ed = useEditable(id, raw, "text");
   const { cls, svg } = look(raw, "text", true);
   return (
-    <div className={cls} style={colorStyle(raw)} onDoubleClick={ed.start}>
+    <div className={cls + (raw.icon ? " has-icon" : "")} style={colorStyle(raw)} onDoubleClick={ed.start}>
       {svg}
+      <IconView raw={raw} />
       <NodeResizer isVisible={selected} minWidth={40} minHeight={30} />
       <Handles id={id} raw={raw} />
       {ed.editing ? (

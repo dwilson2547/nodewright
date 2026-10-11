@@ -62,6 +62,12 @@ export const LINE_WIDTHS: Option[] = [
   { value: "6", label: "Heavy" },
 ];
 
+// How a text node's icon is drawn (nodes.tsx IconView); nodewright's own.
+export const ICON_COLORS: Option[] = [
+  { value: "", label: "Icon in node colour" },
+  { value: "original", label: "Icon's own colours" },
+];
+
 // Rounding of each bend on a right-angle route or detour (edges.tsx).
 export const CORNER_RADII: Option[] = [
   { value: "", label: "Default corners" },

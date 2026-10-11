@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.12.0 - 2026-10-11
+
+### Added
+- Icons: the palette has an **Icons** section with 73 built-in Lucide line icons and your own.
+  Click one to add an icon node (its text becomes the caption), or drag it onto the canvas;
+  clicking with a plain text box selected puts the icon on that box. Icons take the node's colour,
+  or keep their own colours (toolbar: icon colours). **Remove icon** keeps the text.
+- Upload SVG icons. Every upload is checked against an allowlist of drawing elements and
+  attributes: script, event handlers, embedded HTML, external links and `<style>` are rejected
+  with the reason; Inkscape metadata is dropped and `style` attributes become plain attributes.
+  What's stored is rebuilt from the checked drawing, and icons are only ever shown as images.
+- Icons can carry ports, which a node gets when the icon is placed on it.
+- MCP: `list_icons`; `add_elements` takes `icon` on text nodes. Zip export includes the icons a
+  workspace uses.
+
+### Changed
+- Database migration `0004` adds the `icons` table (runs at startup).
+
 ## 0.11.0 - 2026-10-11
 
 ### Added

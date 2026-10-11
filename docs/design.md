@@ -225,7 +225,7 @@ of editor polish.
 4. **Sharing:** ✅ (0.7.0) read-only share links (§9) and folders (§11.2); ✅ (0.8.0) workspace
    members (§11.1). Organisations with built-in roles come last in the order below.
 5. **Next, in order** (✅ user, 2026-10-11): ✅ workspace zip export (0.9.0) → ✅ edge corner radius (0.10.0) →
-   ✅ node ports (0.11.0) → custom icons, built-in set and icon creator (§13) → schema nodes (§12) and schematics → manual edge waypoints →
+   ✅ node ports (0.11.0) → ✅ icons and built-in set (0.12.0) → icon creator (§13) → schema nodes (§12) and schematics → manual edge waypoints →
    organisations and roles.
 6. **Stretch:** marketplace (§11.5), custom roles.
 
@@ -258,7 +258,7 @@ phase as 0.4.0 (see `CHANGELOG.md`): MCP server, access tokens, auto-layout, edi
 updates, style guides, shapes and line styles, templates, tab links, attachments, and
 `authorize()` with a members table (no sharing UI). 0.7.0 added folders, read-only share links,
 Alembic migrations, CI and the unused-attachment sweep. 0.8.0 added workspace members, 0.9.0 workspace zip
-export, 0.10.0 edge corner radius, 0.11.0 node ports. Not yet: organisations, zip import. Live updates are in-process, so the chart must stay at
+export, 0.10.0 edge corner radius, 0.11.0 node ports, 0.12.0 icons. Not yet: organisations, zip import. Live updates are in-process, so the chart must stay at
 one replica until `events.py` moves to Postgres LISTEN/NOTIFY.
 
 ## 11. Future: collaboration and community 📐
@@ -404,7 +404,25 @@ from the editor may name missing ones (dangling).
 - No migration: everything lives in the canvas JSON. `canvas_format` already leaves unknown keys
   alone; ports get a shape check like `styleAttributes`.
 
-### 13.2 Icons
+### 13.2 Icons ✅ (0.12.0, `icons.py`, `svgsafe.py`, `ui/src/icons.ts`; icon creator not yet)
+
+Built as below, with these specifics:
+- Validation: `defusedxml` (no DTD/entities), element and attribute allowlists, `style`
+  attributes converted into checked presentation attributes, a `<style>` element rejected, editor
+  namespaces and `<metadata>` dropped. 256 KB / 5000 elements / depth 32. All 1539 Lucide 0.460.0
+  icons pass.
+- Built-in set: 73 Lucide 0.460.0 icons in `api/nodewright/builtin_icons/` with its ISC LICENSE
+  (✅ verified from the package's LICENSE file); ids `lucide-<name>`.
+- Library: `icons` table (migration `0004`), per user, at most 500. `GET /api/icons/<id>.svg`
+  serves any icon by id without sign-in, so members and share-link viewers see icons they don't
+  own.
+- Node: `icon: "icons/<id>/<name>.svg"` on a text node; `styleAttributes.iconColors = "original"`
+  draws it in its own colours, otherwise it is a mask filled with the node colour. The default
+  comes from the icon's `tinted` flag when placed.
+- Palette **Icons** section: search, click to add a 120x120 icon node (or to put the icon on the
+  selected text box if it has none), drag to place, upload SVG, delete your own. An icon's ports
+  are copied to a node that has none.
+- MCP `list_icons`; `add_elements` takes `icon`. Zip export writes `icons/<id>/<name>.svg`.
 
 - **Upload with validation.** Parse the SVG with a hardened XML parser (no DTDs or entities). Then
   check every element and attribute against an **allowlist** of drawing elements (svg, g, path,

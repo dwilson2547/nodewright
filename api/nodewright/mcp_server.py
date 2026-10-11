@@ -21,7 +21,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.streamable_http_manager import StreamableHTTPASGIApp
 from mcp.server.transport_security import TransportSecuritySettings
 
-from . import (__version__, access, attachments, canvas_format, folders, leases, ops, render, storage,
+from . import (__version__, access, attachments, canvas_format, folders, icons, leases, ops, render, storage,
                styleguide, styles, templates, tokens)
 from .config import Settings
 from .db import Database
@@ -223,7 +223,8 @@ def build(db: Database, settings: Settings, store: storage.Store | None = None,
                                      "and auto-size), ports ([{id, side: top|right|bottom|left, "
                                      "at: 0-1 along that side from its top/left end, label?}]: "
                                      "named connection points that replace the four side "
-                                     "handles). " + NODE_STYLE)] = [],  # noqa: B006
+                                     "handles), icon (a `file` from list_icons, shown above a "
+                                     "text node's text). " + NODE_STYLE)] = [],  # noqa: B006
                      edges: Annotated[list[dict], Field(
                          description="Edges to add: fromNode, toNode (ids, existing or from "
                                      "`nodes`). Optional: id, label, color, fromEnd/toEnd "
@@ -289,6 +290,20 @@ def build(db: Database, settings: Settings, store: storage.Store | None = None,
         def go(s, user, who):
             access.canvas(s, user, canvas_id)
             return {"released": leases.release(s, canvas_id, who)}
+        return run(ctx, go)
+
+    @server.tool()
+    def list_icons(ctx: Context) -> dict:
+        """Icons you can put on text nodes: the user's own first, then built-ins
+        (Lucide line icons: server, database, cloud, user, lock, queue-like
+        inbox/send, ...). Show one by setting a text node's `icon` to the
+        icon's `file`; the node's text becomes its caption, so give it a
+        square-ish size (e.g. 120x120). Icons with `ports` were drawn with
+        connection points: copy them onto the node as its `ports`."""
+        def go(s, user, who):
+            brief = lambda i: {k: i[k] for k in ("id", "name", "file", "ports")}  # noqa: E731
+            return {"mine": [brief(icons.out(i)) for i in icons.mine(s, user)],
+                    "builtin": [brief(icons.out(b)) for b in icons.builtins().values()]}
         return run(ctx, go)
 
     @server.tool()

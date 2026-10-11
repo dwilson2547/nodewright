@@ -329,3 +329,19 @@ class ShareLink(Base):
     created_by: Mapped[str | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Icon(Base):
+    """A user's uploaded or drawn icon (design §13.2, icons.py): an SVG that
+    passed svgsafe.clean(), how it's drawn by default when placed (`tinted`:
+    filled with the node's colour) and the ports a node gets with it."""
+    __tablename__ = "icons"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(100))
+    svg: Mapped[str] = mapped_column(Text)
+    tinted: Mapped[bool] = mapped_column(Boolean, default=True)
+    ports: Mapped[list] = mapped_column(Json, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

@@ -112,6 +112,21 @@ input[type="color"] { width: 24px; height: 22px; padding: 0; border: none; backg
 .border-dotted .nw-outline > * { stroke-dasharray: 2 4; }
 .border-invisible .nw-outline > * { stroke: transparent; }
 .nw-node.align-center .nw-body { text-align: center; }
+/* Text nodes with an icon (nodes.tsx IconView): icon on top, the text as its caption. */
+.nw-node.has-icon { display: flex; flex-direction: column; }
+.nw-icon { flex: 1 1 auto; min-height: 20px; margin: 10px 10px 0; object-fit: contain; width: calc(100% - 20px); }
+.nw-icon.tinted { background: var(--node-color, var(--fg)); }
+.nw-icon.missing { display: grid; place-items: center; font-size: 11px; color: var(--muted); border: 1px dashed var(--border); }
+.nw-node.has-icon .nw-body { flex: 0 0 auto; height: auto; max-height: 50%; text-align: center; padding: 4px 8px 8px; }
+/* palette icons (Palette.tsx) */
+.palette-icons { display: grid; grid-template-columns: repeat(auto-fill, minmax(44px, 1fr)); gap: 4px; }
+.palette-icon { position: relative; }
+.palette-icon > button.palette-insert { width: 100%; aspect-ratio: 1; display: grid; place-items: center; padding: 6px; }
+.palette-icon .glyph { width: 22px; height: 22px; background: var(--fg); }
+.palette-icon img.glyph { background: none; object-fit: contain; }
+.palette-icon .tab-x { position: absolute; top: -4px; right: -4px; display: none; }
+.palette-icon:hover .tab-x { display: block; }
+.palette-search { width: 100%; margin-bottom: 6px; }
 .nw-node.align-right .nw-body { text-align: right; }
 .react-flow__node.selected .nw-node.svgshape, .react-flow__node.selected .nw-node.shape-circle { box-shadow: none; outline: 2px dashed var(--accent); outline-offset: 3px; }
 .nw-markers { position: absolute; width: 0; height: 0; }

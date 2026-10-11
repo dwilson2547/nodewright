@@ -23,7 +23,8 @@ from pydantic import AnyHttpUrl, BaseModel, ConfigDict
 from starlette.routing import Route
 
 from . import (__version__, access, attachments, auth, bundle, canvas_format, events, folders,
-               leases, members, mcp_server, oauth, oidc, render, shares, storage, styleguide, templates, tokens)
+               icons, leases, members, mcp_server, oauth, oidc, render, shares, storage, styleguide,
+               svgsafe, templates, tokens)
 from .config import Settings
 from .db import Database
 from .models import (AccessToken, Attachment, Canvas, CanvasRevision, OAuthGrant, ShareLink, StyleGuide,
@@ -62,6 +63,20 @@ class FileIn(BaseModel):
 class MemberIn(BaseModel):
     username: str = Field(min_length=1, max_length=64)
     role: str = Field(default="editor", max_length=32)
+
+
+class IconIn(BaseModel):
+    name: str = Field(min_length=1, max_length=icons.MAX_NAME)
+    svg: str = Field(min_length=1, max_length=svgsafe.MAX_BYTES)
+    tinted: bool = True
+    ports: list[dict] = []
+
+
+class IconPatch(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=icons.MAX_NAME)
+    svg: str | None = Field(default=None, min_length=1, max_length=svgsafe.MAX_BYTES)
+    tinted: bool | None = None
+    ports: list[dict] | None = None
 
 
 class RoleIn(BaseModel):
@@ -647,6 +662,50 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
         else:
             row.text, row.updated_at = body.text, utcnow()
         return {"text": body.text, "is_default": False}
+
+    # --- icons (icons.py, svgsafe.py) ----------------------------------------
+
+    def icon_error(exc: icons.IconError) -> HTTPException:
+        return HTTPException(exc.status, str(exc))
+
+    @app.get("/api/icons")
+    def list_icons(user: User = Depends(user_dep), s: Session = Depends(session)):
+        return {"builtin": [icons.out(b) for b in icons.builtins().values()],
+                "mine": [icons.out(i) for i in icons.mine(s, user)]}
+
+    @app.post("/api/icons", status_code=201)
+    def create_icon(body: IconIn, user: User = Depends(user_dep), s: Session = Depends(session)):
+        try:
+            return icons.out(icons.create(s, user, body.name, body.svg, body.tinted, body.ports))
+        except icons.IconError as exc:
+            raise icon_error(exc) from None
+
+    @app.patch("/api/icons/{icon_id}")
+    def patch_icon(icon_id: str, body: IconPatch, user: User = Depends(user_dep),
+                   s: Session = Depends(session)):
+        try:
+            icon = icons.get_own(s, user, icon_id)
+            return icons.out(icons.update(icon, body.model_dump(exclude_unset=True)))
+        except icons.IconError as exc:
+            raise icon_error(exc) from None
+
+    @app.delete("/api/icons/{icon_id}", status_code=204)
+    def delete_icon(icon_id: str, user: User = Depends(user_dep), s: Session = Depends(session)):
+        try:
+            s.delete(icons.get_own(s, user, icon_id))
+        except icons.IconError as exc:
+            raise icon_error(exc) from None
+        return Response(status_code=204)
+
+    @app.get("/api/icons/{icon_id}.svg")
+    def icon_svg(icon_id: str, s: Session = Depends(session)):
+        """By id, without sign-in: share links and members show icons they don't own."""
+        svg = icons.svg_for(s, icon_id)
+        if svg is None:
+            raise HTTPException(404, "no such icon")
+        return Response(svg, media_type="image/svg+xml", headers={
+            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+            "Cache-Control": "private, max-age=300"})
 
     # --- templates (templates.py) ------------------------------------------
 

@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState, type DragEvent } from "react";
-import { api, type JsonCanvas, type Template, type TemplateKind } from "./api";
+import { useCallback, useEffect, useRef, useState, type DragEvent } from "react";
+import { api, type Icon, type JsonCanvas, type Template, type TemplateKind } from "./api";
+import { ICON_DRAG_TYPE } from "./icons";
 import { DEFAULT_COLOR, resolveColor } from "./canvasMapping";
 import { attr } from "./styles";
 
@@ -43,18 +44,87 @@ function Thumb({ doc }: { doc: JsonCanvas }) {
   );
 }
 
+// Icons (design §13.2): built-ins and the user's own; click to add an icon
+// node (or set the icon of the selected text node), drag to place one.
+function Icons({ editable, onIcon, fail }: {
+  editable: boolean;
+  onIcon: (icon: Icon) => void;
+  fail: (e: unknown) => void;
+}) {
+  const [icons, setIcons] = useState<{ builtin: Icon[]; mine: Icon[] }>({ builtin: [], mine: [] });
+  const [q, setQ] = useState("");
+  const file = useRef<HTMLInputElement>(null);
+  const load = useCallback(() => { api.icons().then(setIcons, fail); }, [fail]);
+  useEffect(load, [load]);
+
+  const upload = async (f: File) => {
+    const name = prompt("Icon name", f.name.replace(/\.svg$/i, ""))?.trim();
+    if (!name) return;
+    const tinted = confirm("Draw this icon in the node's colour?\n\nOK for one-colour line icons; "
+      + "Cancel to keep the SVG's own colours.");
+    try {
+      await api.createIcon({ name, svg: await f.text(), tinted });
+      load();
+    } catch (e) {
+      fail(e);
+    }
+  };
+  const remove = async (i: Icon) => {
+    if (!confirm(`Delete the icon "${i.name}"? Nodes using it will show "missing icon".`)) return;
+    await api.deleteIcon(i.id).then(load, fail);
+  };
+  const drag = (i: Icon) => (e: DragEvent) => {
+    e.dataTransfer.setData(ICON_DRAG_TYPE, JSON.stringify(i));
+    e.dataTransfer.effectAllowed = "copy";
+  };
+  const match = (i: Icon) => !q || i.name.toLowerCase().includes(q.toLowerCase());
+  const all = [...icons.mine, ...icons.builtin].filter(match);
+
+  return (
+    <section>
+      <h5>Icons</h5>
+      <input className="palette-search" type="search" placeholder="Search icons" value={q}
+        onChange={(e) => setQ(e.target.value)} aria-label="Search icons" />
+      <div className="palette-icons">
+        {all.map((i) => (
+          <div key={i.id} className={"palette-icon" + (i.builtin ? "" : " mine")}>
+            <button className="palette-insert" draggable={editable} disabled={!editable} onDragStart={drag(i)}
+              onClick={() => onIcon(i)} title={editable ? `${i.name}: click to add (or put on the selected text box), or drag` : i.name}>
+              {i.tinted
+                ? <span className="glyph" style={{ mask: `url("${i.url}") center / contain no-repeat`, WebkitMask: `url("${i.url}") center / contain no-repeat` }} />
+                : <img className="glyph" src={i.url} alt="" />}
+            </button>
+            {!i.builtin && <button className="tab-x" title="Delete icon" onClick={() => void remove(i)}>×</button>}
+          </div>
+        ))}
+      </div>
+      {editable && <>
+        <button className="palette-save" onClick={() => file.current?.click()}>Upload SVG icon…</button>
+        <input ref={file} type="file" accept=".svg,image/svg+xml" hidden onChange={(e) => {
+          const f = e.target.files?.[0];
+          e.target.value = "";
+          if (f) void upload(f);
+        }} />
+      </>}
+    </section>
+  );
+}
+
 type Props = {
   editable: boolean;
   reloadKey: number;
   onInsert: (t: Template) => void;
+  onIcon: (icon: Icon) => void;
   onSavePage: () => Promise<void>;
   onClose: () => void;
 };
 
-export function Palette({ editable, reloadKey, onInsert, onSavePage, onClose }: Props) {
+export function Palette({ editable, reloadKey, onInsert, onIcon, onSavePage, onClose }: Props) {
   const [list, setList] = useState<Template[]>([]);
   const [defaultPage, setDefaultPage] = useState("");
   const [error, setError] = useState<string | null>(null);
+
+  const fail = useCallback((e: unknown) => setError(e instanceof Error ? e.message : String(e)), []);
 
   const load = useCallback(() => {
     api.templates().then((r) => {
@@ -143,6 +213,7 @@ export function Palette({ editable, reloadKey, onInsert, onSavePage, onClose }: 
           </section>
         );
       })}
+      <Icons editable={editable} onIcon={onIcon} fail={fail} />
       <p className="muted small">Select nodes and use <em>Save as template</em> to add your own shapes and snippets.</p>
     </aside>
   );

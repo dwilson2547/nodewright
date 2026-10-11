@@ -2,7 +2,7 @@
 
 Keys and values are the Obsidian Advanced Canvas plugin's `styleAttributes`
 (checked at its commit 4b8630c), so styled documents also render there.
-`lineWidth` and `cornerRadius` are nodewright's own. An absent key means the default.
+`lineWidth`, `cornerRadius` and `iconColors` are nodewright's own. An absent key means the default.
 
 canvas_format only checks the shape (an object of strings), so documents from
 newer plugin versions with values we don't know still load. Agent writes are
@@ -16,6 +16,7 @@ NODE = {
               "database"},
     "border": {"dashed", "dotted", "invisible"},
     "textAlign": {"center", "right"},
+    "iconColors": {"original"},  # nodewright's own: draw a node's icon in its own colours
 }
 EDGE = {
     "path": {"dotted", "short-dashed", "long-dashed"},

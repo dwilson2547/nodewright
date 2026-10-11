@@ -25,7 +25,8 @@ import {
   type Edge,
   type Node,
 } from "@xyflow/react";
-import { api, ApiError, CLIENT_ID, isMine, releaseOnUnload, type CanvasEvent, type JsonCanvas, type Lease, type Template } from "./api";
+import { api, ApiError, CLIENT_ID, isMine, releaseOnUnload, type CanvasEvent, type Icon, type JsonCanvas, type Lease, type Template } from "./api";
+import { ICON_DRAG_TYPE } from "./icons";
 import { DRAG_TYPE, Palette } from "./Palette";
 import { endFields, portsOf, type Port } from "./ports";
 import { PortsPanel } from "./PortsPanel";
@@ -44,7 +45,7 @@ import { RoutedEdge } from "./edges";
 import { Markers } from "./markers";
 import { canvasFile, TabLinksContext } from "./tablinks";
 import {
-  CORNER_RADII, EDGE_ARROWS, EDGE_PATHS, EDGE_ROUTES, LINE_WIDTHS, NODE_BORDERS, NODE_SHAPES, TEXT_ALIGN,
+  CORNER_RADII, EDGE_ARROWS, ICON_COLORS, EDGE_PATHS, EDGE_ROUTES, LINE_WIDTHS, NODE_BORDERS, NODE_SHAPES, TEXT_ALIGN,
   attr, withAttr, type Option,
 } from "./styles";
 
@@ -460,6 +461,33 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
     setNodes((ns) => [...ns.map((n) => ({ ...n, selected: false })), node]);
   };
 
+  // An icon from the palette: added to the one selected text node if it has
+  // no icon yet (so clicking several icons in a row adds several nodes),
+  // otherwise a new icon node (caption = the icon's name) at `at` or in a free
+  // spot. The node takes the icon's ports when it has none, and its colour mode.
+  const placeIcon = (icon: Icon, at?: { x: number; y: number }) => {
+    const iconFields = (raw: Record<string, any>) => {
+      const next: Record<string, any> = withAttr({ ...raw, icon: icon.file }, "iconColors", icon.tinted ? "" : "original");
+      if (icon.ports.length && !portsOf(raw).length) next.ports = icon.ports;
+      return next;
+    };
+    const target = !at && selNodes.length === 1 && selEdges.length === 0 && selNodes[0].data.raw.type === "text"
+      && !selNodes[0].data.raw.icon ? selNodes[0] : null;
+    if (target) {
+      setNodes((ns) => ns.map((n) => (n.id === target.id ? { ...n, data: { raw: iconFields(n.data.raw) } } : n)));
+      return;
+    }
+    const [w, h] = [120, 120];
+    const pos = at ?? freeSpot(w, h);
+    const raw = iconFields({
+      id: newId(), type: "text", text: icon.name, x: snapTo(pos.x), y: snapTo(pos.y), width: w, height: h,
+    });
+    const node: CNode = {
+      id: raw.id, type: "text", position: { x: raw.x, y: raw.y }, width: w, height: h, zIndex: 1, data: { raw }, selected: true,
+    };
+    setNodes((ns) => [...ns.map((n) => ({ ...n, selected: false })), node]);
+  };
+
   // A template is a JSON Canvas fragment starting at (0, 0): copy it with
   // fresh ids, its top-left at `at` (flow coordinates) or in a free spot.
   const insertTemplate = (t: Template, at?: { x: number; y: number }) => {
@@ -537,7 +565,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
       if (!dropping) setDropping(true);
       return;
     }
-    if (readOnly || !e.dataTransfer.types.includes(DRAG_TYPE)) return;
+    if (readOnly || !(e.dataTransfer.types.includes(DRAG_TYPE) || e.dataTransfer.types.includes(ICON_DRAG_TYPE))) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = "copy";
   };
@@ -552,6 +580,13 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
       e.preventDefault();
       const at = flow.screenToFlowPosition({ x: e.clientX, y: e.clientY });
       await uploadFiles([...e.dataTransfer.files], at);
+      return;
+    }
+    const iconData = e.dataTransfer.getData(ICON_DRAG_TYPE);
+    if (iconData && !readOnly) {
+      e.preventDefault();
+      const at = flow.screenToFlowPosition({ x: e.clientX, y: e.clientY });
+      placeIcon(JSON.parse(iconData) as Icon, { x: at.x - 60, y: at.y - 60 });
       return;
     }
     const id = e.dataTransfer.getData(DRAG_TYPE);
@@ -879,6 +914,19 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
                   onChange={(v) => setNodeAttr("shape", v, (n) => n.data.raw.type === "text")} />
                 <Pick title="Text alignment" options={TEXT_ALIGN} value={common(textRaws, "textAlign")}
                   onChange={(v) => setNodeAttr("textAlign", v, (n) => n.data.raw.type === "text")} />
+                {textRaws.some((r) => r.icon) && <>
+                  <Pick title="Icon colours" options={ICON_COLORS} value={common(textRaws.filter((r) => r.icon), "iconColors")}
+                    onChange={(v) => setNodeAttr("iconColors", v, (n) => !!n.data.raw.icon)} />
+                  <button title="Remove the icon, keeping the text" onClick={() => {
+                    const ids = new Set(selNodes.filter((n) => n.data.raw.icon).map((n) => n.id));
+                    setNodes((ns) => ns.map((n) => {
+                      if (!ids.has(n.id)) return n;
+                      const raw = withAttr({ ...n.data.raw }, "iconColors", "");
+                      delete raw.icon;
+                      return { ...n, data: { raw } };
+                    }));
+                  }}>Remove icon</button>
+                </>}
               </>
             )}
             {nodeRaws.length > 0 && (
@@ -963,6 +1011,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
       <Markers edges={edges} />
       {paletteOpen && (
         <Palette editable={!readOnly} reloadKey={tplReload} onInsert={(t) => insertTemplate(t)}
+          onIcon={(i) => placeIcon(i)}
           onSavePage={savePage} onClose={() => setPaletteOpen(false)} />
       )}
       {labelEdit && (
