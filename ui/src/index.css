@@ -132,6 +132,28 @@ input[type="color"] { width: 24px; height: 22px; padding: 0; border: none; backg
 .nw-node.has-icon.no-caption .nw-icon { margin: 0; width: 100%; height: 100%; }
 .nw-node.has-icon.no-caption .nw-body { display: none; }
 .nw-node.has-icon.border-invisible { background: transparent; }
+/* schema nodes (nodes.tsx SchemaBody); metrics match schema.ts / schemas.py: header 28, pad 8, line 18 */
+.nw-schema-node { display: flex; flex-direction: column; }
+.nw-schema { display: flex; flex-direction: column; height: 100%; min-width: 0; }
+.nw-schema-head { height: 28px; flex: 0 0 28px; box-sizing: border-box; display: flex; align-items: center; gap: 8px; padding: 0 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--node-color) 35%, transparent); font-size: 12px; overflow: hidden; white-space: nowrap; }
+.nw-schema-fmt { font-weight: 700; text-transform: uppercase; letter-spacing: .04em; font-size: 10px; color: var(--node-color); }
+.nw-schema-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.nw-schema-err { color: var(--danger); overflow: hidden; text-overflow: ellipsis; }
+.nw-schema-code, .nw-schema-edit { margin: 0; padding: 8px 10px; font: 12px/18px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre; overflow: hidden; flex: 1 1 auto; tab-size: 2; }
+.nw-schema-edit { border: none; resize: none; background: var(--node-bg); color: var(--fg); outline: none; overflow: auto; }
+.nw-handle.nw-port.nw-port-field { width: 6px; height: 6px; opacity: 0; }
+.react-flow__node:hover .nw-handle.nw-port-field, .react-flow__node.selected .nw-handle.nw-port-field,
+.react-flow__connectionline ~ * .nw-port-field { opacity: 1; }
+/* highlight.js tokens, both themes */
+.hljs-string { color: #0a7f45; } .hljs-number, .hljs-literal { color: #b0560b; }
+.hljs-keyword, .hljs-built_in, .hljs-type { color: #7c3aed; } .hljs-attr, .hljs-attribute, .hljs-title { color: #1d5fbf; }
+.hljs-comment { color: var(--muted); font-style: italic; } .hljs-meta, .hljs-punctuation { color: var(--muted); }
+@media (prefers-color-scheme: dark) {
+  .hljs-string { color: #5fd38d; } .hljs-number, .hljs-literal { color: #f0a35e; }
+  .hljs-keyword, .hljs-built_in, .hljs-type { color: #b794f6; } .hljs-attr, .hljs-attribute, .hljs-title { color: #7ab4ff; }
+}
 /* icon creator (IconCreator.tsx) */
 .icon-creator { width: min(860px, 96vw); }
 .ic-body { display: grid; grid-template-columns: auto minmax(260px, 1fr) 200px; gap: 12px; align-items: start; }

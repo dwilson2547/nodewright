@@ -24,7 +24,7 @@ from pydantic import AnyHttpUrl, BaseModel, ConfigDict
 from starlette.routing import Route
 
 from . import (__version__, access, attachments, auth, bundle, canvas_format, events, folders,
-               icons, leases, members, mcp_server, oauth, oidc, render, shares, storage, styleguide,
+               icons, leases, members, schemas, mcp_server, oauth, oidc, render, shares, storage, styleguide,
                svgsafe, templates, tokens)
 from .config import Settings
 from .db import Database
@@ -72,6 +72,11 @@ class IconIn(BaseModel):
     tinted: bool = True
     ports: list[dict] = []
     source: dict | None = None
+
+
+class SchemaIn(BaseModel):
+    format: str = Field(max_length=16)
+    source: str = Field(max_length=schemas.MAX_SOURCE)
 
 
 class IconPatch(BaseModel):
@@ -665,6 +670,19 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
         else:
             row.text, row.updated_at = body.text, utcnow()
         return {"text": body.text, "is_default": False}
+
+    # --- schema nodes (schemas.py) -------------------------------------------
+
+    @app.post("/api/schemas/parse")
+    def parse_schema(body: SchemaIn, user: User = Depends(user_dep)):
+        """What the editor stores for a schema node: fenced text, height and
+        ports, plus the fields and any parse error to show."""
+        node = {"schema": body.format, "text": body.source}
+        try:
+            result = schemas.derive(node)
+        except schemas.SchemaError as exc:
+            raise HTTPException(422, str(exc)) from None
+        return {**result, "text": node["text"], "height": node["height"], "ports": node["ports"]}
 
     # --- icons (icons.py, svgsafe.py) ----------------------------------------
 

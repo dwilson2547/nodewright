@@ -2,7 +2,9 @@ import { createContext, memo, useContext, useEffect, useRef, useState, type CSSP
 import { Handle, NodeResizer, Position, useReactFlow, useUpdateNodeInternals, type NodeProps } from "@xyflow/react";
 import { resolveColor, type CNode } from "./canvasMapping";
 import { Markdown, safeUrl } from "./markdown";
+import { api, type SchemaParse } from "./api";
 import { iconUrl } from "./icons";
+import { highlight, SCHEMA_FORMATS, unfence, type SchemaFormat } from "./schema";
 import { portHandle, portsOf, type Port } from "./ports";
 import { attr } from "./styles";
 import { attachmentOf, TabLinksContext, isCanvasFile, linkTarget, subpathNode } from "./tablinks";
@@ -22,11 +24,86 @@ const POSITION: Record<Port["side"], Position> = {
 const along = (p: Port): CSSProperties =>
   p.side === "left" || p.side === "right" ? { top: `${p.at * 100}%` } : { left: `${p.at * 100}%` };
 
+/** How the editor applies a schema node's parse result (fenced text, height,
+ * ports) so its lines follow; absent on read-only pages. */
+export const SchemaOps = createContext<((id: string, parsed: SchemaParse) => void) | null>(null);
+
+// Last parse per format+source, so headers and errors show without re-asking.
+const parsed = new Map<string, SchemaParse | "pending">();
+
+function SchemaBody({ id, raw }: { id: string; raw: Record<string, any> }) {
+  const fmt = raw.schema as SchemaFormat;
+  const source = unfence(raw.text);
+  const apply = useContext(SchemaOps);
+  const readOnly = useContext(ReadOnly);
+  const key = fmt + "\n" + source;
+  const [, rerender] = useState(0);
+  const info = parsed.get(key);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  // Header name and parse errors need the server's parse; only signed-in pages can ask.
+  useEffect(() => {
+    if (parsed.has(key) || !apply) return;
+    parsed.set(key, "pending");
+    api.parseSchema(fmt, source).then((r) => { parsed.set(key, r); rerender((n) => n + 1); }, () => parsed.delete(key));
+  }, [key, fmt, source, apply]);
+
+  const commit = async () => {
+    setEditing(false);
+    if (!apply || draft === source) return;
+    setBusy(true);
+    try {
+      const r = await api.parseSchema(fmt, draft);
+      parsed.set(fmt + "\n" + unfence(r.text), r);
+      apply(id, r);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const label = SCHEMA_FORMATS.find((f) => f.value === fmt)?.label.split(" ")[0] ?? fmt;
+  const known = info && info !== "pending" ? info : null;
+  return (
+    <div className="nw-schema" onDoubleClick={(e) => {
+      e.stopPropagation();
+      if (!apply || readOnly) return;
+      setDraft(source);
+      setEditing(true);
+    }}>
+      <div className="nw-schema-head" title={known?.error ?? undefined}>
+        <span className="nw-schema-fmt">{label}</span>
+        <span className="nw-schema-name">{known?.name ?? ""}</span>
+        {known?.error && <span className="nw-schema-err">⚠ {known.error}</span>}
+        {busy && <span className="muted">parsing…</span>}
+      </div>
+      {editing ? (
+        <textarea className="nodrag nowheel nw-edit nw-schema-edit" autoFocus value={draft} spellCheck={false}
+          onChange={(e) => setDraft(e.target.value)} onBlur={() => void commit()}
+          onKeyDown={(e) => {
+            e.stopPropagation();
+            if (e.key === "Escape") setEditing(false);
+            else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) void commit();
+            else if (e.key === "Tab") {
+              e.preventDefault();
+              const t = e.currentTarget, s = t.selectionStart;
+              setDraft(draft.slice(0, s) + "  " + draft.slice(t.selectionEnd));
+              requestAnimationFrame(() => t.setSelectionRange(s + 2, s + 2));
+            }
+          }} />
+      ) : (
+        <pre className="nw-schema-code"><code dangerouslySetInnerHTML={{ __html: highlight(fmt, source) }} /></pre>
+      )}
+    </div>
+  );
+}
+
 // Every handle is a "source"; the flow runs in ConnectionMode.Loose, so any
 // side or port can connect to any other, as in JSON Canvas. A node with ports
 // shows those instead of the side handles, which stay (hidden, not
 // connectable) for edges whose port has gone.
 function Handles({ id, raw }: { id: string; raw: Record<string, any> }) {
+  const field = !!raw.schema; // schema field ports show on hover, not all the time
   const ports = portsOf(raw);
   const updateInternals = useUpdateNodeInternals();
   const key = JSON.stringify(ports);
@@ -40,7 +117,7 @@ function Handles({ id, raw }: { id: string; raw: Record<string, any> }) {
       ))}
       {ports.map((p) => (
         <Handle key={p.id} id={portHandle(p.id)} type="source" position={POSITION[p.side]}
-          className="nw-handle nw-port" style={along(p)} title={p.label || p.id} />
+          className={"nw-handle nw-port" + (field ? " nw-port-field" : "")} style={along(p)} title={p.label || p.id} />
       ))}
       {ports.filter((p) => p.label).map((p) => (
         <span key={"l:" + p.id} className={`nw-port-label side-${p.side}`} style={along(p)}>{p.label}</span>
@@ -152,6 +229,17 @@ export const TextNode = memo(({ id, data, selected }: NodeProps<CNode>) => {
   const raw = data.raw;
   const ed = useEditable(id, raw, "text");
   const { cls, svg } = look(raw, "text", true);
+  if (raw.schema) {
+    const h = Number(raw.height) || 60;
+    return (
+      <div className={cls + " nw-schema-node"} style={colorStyle(raw)}>
+        {/* Height follows the source (schemas.py), so only the width resizes. */}
+        <NodeResizer isVisible={selected} minWidth={220} minHeight={h} maxHeight={h} />
+        <Handles id={id} raw={raw} />
+        <SchemaBody id={id} raw={raw} />
+      </div>
+    );
+  }
   return (
     <div className={cls + (raw.icon ? " has-icon" + (raw.text ? "" : " no-caption") : "")} style={colorStyle(raw)} onDoubleClick={ed.start}>
       {svg}

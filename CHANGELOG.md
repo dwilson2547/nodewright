@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.14.0 - 2026-10-11
+
+### Added
+- Schema nodes: **+ Schema** adds an Avro, Protobuf, JSON / JSON Schema, YAML / OpenAPI or SQL
+  schema, shown syntax-highlighted under a header with its name. Dropping a `.avsc`, `.proto`,
+  `.json`, `.yaml`/`.yml` or `.sql` file onto the canvas makes one too. Double-click to edit
+  (Ctrl+Enter or click away to finish).
+- Every field gets a connection point on each side, level with its line, so lines can join a
+  field in one schema to a field in another: `orders.customer_id` on the right,
+  `orders.customer_id@left` on the left. A schema that stops parsing shows the error in its header
+  and its lines are flagged, not deleted, until it's fixed.
+- Stored as a text node with `schema` and the source in a fenced code block, so Obsidian shows it
+  as highlighted code.
+- MCP: `add_elements` / `update_elements` take `schema` and return each schema's fields.
+
 ## 0.13.0 - 2026-10-11
 
 ### Added

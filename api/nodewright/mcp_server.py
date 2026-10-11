@@ -224,7 +224,12 @@ def build(db: Database, settings: Settings, store: storage.Store | None = None,
                                      "at: 0-1 along that side from its top/left end, label?}]: "
                                      "named connection points that replace the four side "
                                      "handles), icon (a `file` from list_icons, shown above a "
-                                     "text node's text). " + NODE_STYLE)] = [],  # noqa: B006
+                                     "text node's text), schema (avro|protobuf|json|yaml|sql: "
+                                     "the text node's `text` is that schema's source; it is "
+                                     "shown highlighted, sized to fit, and every field gets a "
+                                     "port per side, '<field path>' on the right and "
+                                     "'<field path>@left' on the left, e.g. 'orders.customer_id'; "
+                                     "the result lists each schema's fields). " + NODE_STYLE)] = [],  # noqa: B006
                      edges: Annotated[list[dict], Field(
                          description="Edges to add: fromNode, toNode (ids, existing or from "
                                      "`nodes`). Optional: id, label, color, fromEnd/toEnd "

@@ -8,7 +8,7 @@ live (design §3.2), and dropping them would lose data on every save.
 
 from __future__ import annotations
 
-from . import ports
+from . import ports, schemas
 
 NODE_TYPES = {"text", "file", "link", "group"}
 SIDES = {"top", "right", "bottom", "left"}
@@ -96,6 +96,8 @@ def validate(doc) -> dict:
         if node["type"] == "text":
             _str(node, "text", where, required=True)
             _str(node, "icon", where)
+            if "schema" in node and node["schema"] not in schemas.FORMATS:
+                raise CanvasError(f"{where}.schema must be one of {list(schemas.FORMATS)}")
         elif node["type"] == "file":
             _str(node, "file", where, required=True)
             _str(node, "subpath", where)

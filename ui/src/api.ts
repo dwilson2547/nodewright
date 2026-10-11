@@ -52,6 +52,10 @@ export type Icon = {
   id: string; name: string; file: string; url: string; tinted: boolean; ports: Port[]; builtin: boolean;
   editable: boolean;
 };
+export type SchemaParse = {
+  name: string | null; error: string | null; text: string; height: number; ports: Port[];
+  fields: { path: string; name: string; type: string; line: number }[];
+};
 export type Member = { user_id: string; username: string; role: Role };
 export type Members = { members: Member[]; assignable: Role[]; can_manage: boolean };
 export type Folder = { id: string; name: string; parent_id: string | null };
@@ -108,6 +112,7 @@ export const api = {
   createShare: (canvasId: string, all_tabs: boolean) =>
     call<ShareLink>("POST", `/api/canvases/${canvasId}/shares`, { all_tabs }),
   revokeShare: (id: string) => call("DELETE", `/api/shares/${id}`),
+  parseSchema: (format: string, source: string) => call<SchemaParse>("POST", "/api/schemas/parse", { format, source }),
   icons: () => call<{ builtin: Icon[]; mine: Icon[] }>("GET", "/api/icons"),
   getIcon: (id: string) => call<Icon & { source: unknown }>("GET", `/api/icons/${id}`),
   createIcon: (body: { name: string; svg: string; tinted: boolean; ports?: Port[]; source?: unknown }) =>

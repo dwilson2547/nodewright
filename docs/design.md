@@ -225,8 +225,10 @@ of editor polish.
 4. **Sharing:** ✅ (0.7.0) read-only share links (§9) and folders (§11.2); ✅ (0.8.0) workspace
    members (§11.1). Organisations with built-in roles come last in the order below.
 5. **Next, in order** (✅ user, 2026-10-11): ✅ workspace zip export (0.9.0) → ✅ edge corner radius (0.10.0) →
-   ✅ node ports (0.11.0) → ✅ icons and built-in set (0.12.0) → ✅ icon creator (0.13.0) → schema nodes (§12) and schematics → manual edge waypoints →
-   organisations and roles.
+   ✅ node ports (0.11.0) → ✅ icons and built-in set (0.12.0) → ✅ icon creator (0.13.0) →
+   ✅ schema nodes (0.14.0) → schematics → manual edge waypoints → organisations and roles.
+   Diagram-level versions (named revisions, history browser, restore; ✅ user prefers this to
+   per-schema versions) are still to be placed in this order.
 6. **Stretch:** marketplace (§11.5), custom roles.
 
 Full MCP OAuth (§6.2) was pulled forward and shipped as 0.3.0 (✅ user asked for browser sign-in).
@@ -258,7 +260,8 @@ phase as 0.4.0 (see `CHANGELOG.md`): MCP server, access tokens, auto-layout, edi
 updates, style guides, shapes and line styles, templates, tab links, attachments, and
 `authorize()` with a members table (no sharing UI). 0.7.0 added folders, read-only share links,
 Alembic migrations, CI and the unused-attachment sweep. 0.8.0 added workspace members, 0.9.0 workspace zip
-export, 0.10.0 edge corner radius, 0.11.0 node ports, 0.12.0 icons, 0.13.0 icon creator. Not yet: organisations, zip import. Live updates are in-process, so the chart must stay at
+export, 0.10.0 edge corner radius, 0.11.0 node ports, 0.12.0 icons, 0.13.0 icon creator, 0.14.0
+schema nodes. Not yet: organisations, zip import. Live updates are in-process, so the chart must stay at
 one replica until `events.py` moves to Postgres LISTEN/NOTIFY.
 
 ## 11. Future: collaboration and community 📐
@@ -351,14 +354,20 @@ and install count. Installing copies the item into the user's library, so later 
 don't change installed copies; updates are explicit. Being public, it needs reporting and the ability
 for an admin to unlist items before it is opened up. ⚠ unverified: no abuse/moderation design yet.
 
-## 12. Schema nodes 📐
+## 12. Schema nodes ✅ (0.14.0, `schemas.py`, `ui/src/schema.ts`, `nodes.tsx` SchemaBody)
 
 User direction 2026-10-11 (✅ user): architecture diagrams often link to the schema of a connection
 between apps; nodewright should store that schema **in** the diagram, visible and syntax
 highlighted. Formats to start: Avro, Protobuf, JSON (incl. JSON Schema), YAML, and SQL
 (✅ user, added the same day). A typed node with a parser that reads those files into the element.
 
-Proposed design (not yet agreed):
+Agreed 2026-10-11 (✅ user): ports on both sides of every field; dropped `.json`/`.yaml` files
+become schema nodes. Built as below; parsers cover Avro records (nested records, unions,
+arrays/maps of records), JSON Schema `properties` / `$defs` / `definitions` / OpenAPI
+`components.schemas` (else a plain document's keys), Protobuf messages (nested, `oneof`, one-line
+blocks) and SQL `CREATE TABLE` columns (types with commas, several columns per line). Field cap
+400. `POST /api/schemas/parse` serves the editor; signed-out pages (share, render) show the
+format without the schema name.
 
 - **Stored as a text node** with `schema: "avro"|"protobuf"|"json"|"yaml"|"sql"` and `text` holding
   the source as a fenced code block (```` ```avro ````). Obsidian shows it as a highlighted code

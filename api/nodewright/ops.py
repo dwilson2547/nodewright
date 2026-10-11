@@ -17,7 +17,7 @@ from typing import Callable
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 
-from . import access, canvas_format, events, icons, leases, layout, ports, styles
+from . import access, canvas_format, events, icons, leases, layout, ports, schemas, styles
 from .layout import GRID, GROUP_PAD, NODE_GAP, RANK_GAP, snap
 from .models import Canvas, CanvasRevision, User, utcnow
 
@@ -217,6 +217,8 @@ def _clean_node(raw: dict, ids: set[str]) -> dict:
         except ValueError as exc:
             raise OpError(str(exc)) from None
     _check_icon(n)
+    if "schema" in n:
+        _schema(n)
     if "id" in n:
         if not isinstance(n["id"], str) or not n["id"] or n["id"] in ids:
             raise OpError(f"node id {n.get('id')!r} is empty or already used")
@@ -224,6 +226,30 @@ def _clean_node(raw: dict, ids: set[str]) -> dict:
         n["id"] = new_id()
     ids.add(n["id"])
     return n
+
+
+def _schema(n: dict) -> dict:
+    """A schema node: fenced source, height to fit, a port per field per side (schemas.py)."""
+    if n.get("type") != "text" or n.get("schema") not in schemas.FORMATS:
+        raise OpError(f"schema goes on a text node and must be one of {list(schemas.FORMATS)}")
+    try:
+        result = schemas.derive(n)
+    except schemas.SchemaError as exc:
+        raise OpError(str(exc)) from None
+    n["_parsed"] = result
+    return result
+
+
+def _schema_report(nodes: list[dict]) -> dict:
+    """Per schema node written: its name, field paths (the port ids) or the parse error.
+    Pops the transient `_parsed` so it never reaches the canvas."""
+    out = {}
+    for n in nodes:
+        r = n.pop("_parsed", None)
+        if r is not None:
+            out[n["id"]] = {"name": r["name"], "error": r["error"],
+                            "fields": [f"{f['path']}: {f['type']}" for f in r["fields"]][:100]}
+    return out
 
 
 def _check_icon(n: dict) -> None:
@@ -344,8 +370,9 @@ def add_elements(nodes: list[dict], edges: list[dict], direction: str = "TB"):
         data["nodes"] = new_groups + existing + others
         data["edges"] = data["edges"] + new_edges
         _ports(data, new_edges)
+        report = _schema_report(new)
         return {"node_ids": [n["id"] for n in new], "edge_ids": [e["id"] for e in new_edges],
-                **geometry(data, [n["id"] for n in new])}
+                **geometry(data, [n["id"] for n in new]), **({"schemas": report} if report else {})}
 
     return op
 
@@ -428,13 +455,16 @@ def update_elements(updates: list[dict]):
                     target[k] = v
             if "icon" in u["set"] and u["set"]["icon"] is not None:
                 _check_icon(target)
+            if target.get("schema") is not None and ({"schema", "text"} & set(u["set"])):
+                _schema(target)
             if u.get("fit") and "type" in target and target["type"] != "group":
                 target["width"], target["height"] = auto_size(target)
             changed.append(target["id"])
         # Only ports named in this update are checked: an edge already on a
         # removed port can still have its label or colour changed.
         _ports(data, repointed)
-        return {"updated": changed}
+        report = _schema_report([n for n in data["nodes"] if n["id"] in changed])
+        return {"updated": changed, **({"schemas": report} if report else {})}
 
     return op
 

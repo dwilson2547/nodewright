@@ -25,7 +25,7 @@ import {
   type Edge,
   type Node,
 } from "@xyflow/react";
-import { api, ApiError, CLIENT_ID, isMine, releaseOnUnload, type CanvasEvent, type Icon, type JsonCanvas, type Lease, type Template } from "./api";
+import { api, ApiError, CLIENT_ID, isMine, releaseOnUnload, type CanvasEvent, type Icon, type JsonCanvas, type SchemaParse, type Lease, type Template } from "./api";
 import { ICON_DRAG_TYPE } from "./icons";
 import { DRAG_TYPE, Palette } from "./Palette";
 import { endFields, portsOf, type Port } from "./ports";
@@ -40,7 +40,8 @@ import {
   type CEdge,
   type CNode,
 } from "./canvasMapping";
-import { nodeTypes, ReadOnly } from "./nodes";
+import { nodeTypes, ReadOnly, SchemaOps } from "./nodes";
+import { formatForFile, SAMPLES, SCHEMA_FORMATS, type SchemaFormat } from "./schema";
 import { RoutedEdge } from "./edges";
 import { Markers } from "./markers";
 import { canvasFile, TabLinksContext } from "./tablinks";
@@ -461,6 +462,29 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
     setNodes((ns) => [...ns.map((n) => ({ ...n, selected: false })), node]);
   };
 
+  // A schema node for `source` (a sample, or a dropped file), parsed by the server.
+  const addSchema = async (fmt: SchemaFormat, source = SAMPLES[fmt], at?: { x: number; y: number }) => {
+    let r: SchemaParse;
+    try {
+      r = await api.parseSchema(fmt, source);
+    } catch (e) {
+      flash(`Couldn't read that schema: ${e instanceof Error ? e.message : String(e)}`);
+      return;
+    }
+    const longest = Math.max(...source.split("\n").map((l) => l.length));
+    const w = Math.min(640, Math.max(260, Math.round(longest * 7.3) + 24));
+    const pos = at ?? freeSpot(w, r.height);
+    const raw: Record<string, any> = {
+      id: newId(), type: "text", schema: fmt, text: r.text, ports: r.ports,
+      x: snapTo(pos.x), y: snapTo(pos.y), width: w, height: r.height,
+    };
+    const node: CNode = {
+      id: raw.id, type: "text", position: { x: raw.x, y: raw.y }, width: w, height: r.height, zIndex: 1, data: { raw }, selected: true,
+    };
+    setNodes((ns) => [...ns.map((n) => ({ ...n, selected: false })), node]);
+    if (r.error) flash(`Added, but it doesn't parse yet: ${r.error}`);
+  };
+
   // An icon from the palette: added to the one selected text node if it has
   // no icon yet (so clicking several icons in a row adds several nodes),
   // otherwise a new icon node (caption = the icon's name) at `at` or in a free
@@ -560,7 +584,8 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
     }
   };
 
-  const draggingFiles = (e: React.DragEvent) => !!attachmentLimit && !readOnly && e.dataTransfer.types.includes("Files");
+  // Files: schema files become schema nodes (always); anything else is an attachment (when enabled).
+  const draggingFiles = (e: React.DragEvent) => !readOnly && e.dataTransfer.types.includes("Files");
 
   const onDragOver = (e: React.DragEvent) => {
     if (draggingFiles(e)) {
@@ -582,8 +607,17 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
     setDropping(false);
     if (draggingFiles(e) && e.dataTransfer.files.length > 0) {
       e.preventDefault();
-      const at = flow.screenToFlowPosition({ x: e.clientX, y: e.clientY });
-      await uploadFiles([...e.dataTransfer.files], at);
+      let at = flow.screenToFlowPosition({ x: e.clientX, y: e.clientY });
+      const files = [...e.dataTransfer.files];
+      for (const f of files) {
+        const fmt = formatForFile(f.name);
+        if (!fmt) continue;
+        await addSchema(fmt, await f.text(), at);
+        at = { x: at.x + 40, y: at.y + 40 };
+      }
+      const rest = files.filter((f) => !formatForFile(f.name));
+      if (rest.length && !attachmentLimit) flash("File attachments aren't enabled on this server.");
+      else await uploadFiles(rest, at);
       return;
     }
     const iconData = e.dataTransfer.getData(ICON_DRAG_TYPE);
@@ -663,12 +697,14 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
 
   // Replace a node's ports; its lines follow a renamed port, take a moved
   // port's side, and fall back to their side (flagged) when theirs is gone.
-  const setPorts = useCallback((nodeId: string, ports: Port[], renamed?: [string, string]) => {
+  const setPorts = useCallback((nodeId: string, ports: Port[], renamed?: [string, string],
+    patch: Record<string, any> = {}) => {
     const node = flow.getNode(nodeId) as CNode | undefined;
     if (!node) return;
-    const raw: Record<string, any> = { ...node.data.raw, ports };
+    const raw: Record<string, any> = { ...node.data.raw, ...patch, ports };
     if (!ports.length) delete raw.ports;
-    setNodes((ns) => ns.map((n) => (n.id === nodeId ? { ...n, data: { raw } } : n)));
+    setNodes((ns) => ns.map((n) => (n.id !== nodeId ? n
+      : { ...n, data: { raw }, ...(patch.height ? { height: patch.height } : {}) })));
     setEdges((es) => es.map((e) => {
       if (e.source !== nodeId && e.target !== nodeId) return e;
       const er = { ...e.data!.raw };
@@ -683,6 +719,11 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
       return { ...e, ...edgeEnds(er, from as Record<string, any>, to as Record<string, any>) };
     }));
   }, [flow, setNodes, setEdges]);
+
+  // A schema node's parse (schemas.py): new text, height and field ports; its lines follow.
+  const applySchema = useCallback((nodeId: string, r: SchemaParse) => {
+    setPorts(nodeId, r.ports, undefined, { text: r.text, height: r.height });
+  }, [setPorts]);
 
   // JSON Canvas groups don't own their nodes; like Obsidian, dragging a group
   // carries whatever lies inside it when the drag starts.
@@ -825,6 +866,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
 
   return (
     <ReadOnly.Provider value={readOnly}>
+    <SchemaOps.Provider value={readOnly ? null : applySchema}>
     <div className={"editor" + (readOnly ? " readonly" : "") + (paletteOpen ? " with-palette" : "") + (dropping ? " drop-files" : "")}
       ref={wrapper} onDoubleClick={onPaneDoubleClick} onDragOver={onDragOver} onDragLeave={onDragLeave}
       onDrop={(e) => void onDrop(e)}>
@@ -890,6 +932,11 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
               {tabLinks.tabs.filter((t) => t.id !== canvasId).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
           )}
+          <select value="" title="A schema (Avro, Protobuf, JSON, YAML, SQL) with a connection point per field; or drop a schema file"
+            onChange={(e) => { const f = e.target.value as SchemaFormat; if (f) void addSchema(f); }}>
+            <option value="">+ Schema…</option>
+            {SCHEMA_FORMATS.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
+          </select>
           <button className={paletteOpen ? "on" : ""} onClick={() => setPaletteOpen(!paletteOpen)}
             title="Shapes, snippets and page templates">Templates</button>
           <span className="sep" />
@@ -1034,6 +1081,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
         />
       )}
     </div>
+    </SchemaOps.Provider>
     </ReadOnly.Provider>
   );
 });
