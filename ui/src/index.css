@@ -71,6 +71,32 @@ input[type="color"] { width: 24px; height: 22px; padding: 0; border: none; backg
 .nw-handle { width: 9px; height: 9px; background: var(--accent); border: 2px solid var(--node-bg); opacity: 0; transition: opacity .1s; }
 .react-flow__node:hover .nw-handle, .react-flow__node.selected .nw-handle { opacity: 1; }
 .react-flow__node.selected .nw-node { box-shadow: 0 0 0 2px var(--accent); }
+/* style extensions (styles.ts) */
+.nw-node.border-dashed { border-style: dashed; }
+.nw-node.border-dotted { border-style: dotted; }
+.nw-node.border-invisible { border-color: transparent; }
+.nw-node.shape-pill { border-radius: 9999px; }
+.nw-node.shape-circle { border-radius: 50%; }
+.nw-node.shaped .nw-body { display: flex; flex-direction: column; justify-content: center; position: relative; }
+.nw-node.shape-pill .nw-body { padding: 8px 20px; }
+.nw-node.shape-circle .nw-body { padding: 12% 16%; }
+.nw-node.shape-diamond .nw-body { padding: 14% 24%; }
+.nw-node.shape-parallelogram .nw-body { padding: 8px 18%; }
+.nw-node.shape-predefined-process .nw-body { padding: 8px 11%; }
+.nw-node.shape-document .nw-body { padding: 8px 12px 18%; }
+.nw-node.shape-database .nw-body { padding: 22% 12px 12%; }
+.nw-node.svgshape { border-color: transparent; background: transparent; overflow: visible; }
+.nw-outline { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.nw-outline > * { fill: color-mix(in srgb, var(--node-color) 8%, var(--node-bg)); stroke: var(--node-color); stroke-width: 2; vector-effect: non-scaling-stroke; }
+.nw-outline .line { fill: none; }
+.border-dashed .nw-outline > * { stroke-dasharray: 8 5; }
+.border-dotted .nw-outline > * { stroke-dasharray: 2 4; }
+.border-invisible .nw-outline > * { stroke: transparent; }
+.nw-node.align-center .nw-body { text-align: center; }
+.nw-node.align-right .nw-body { text-align: right; }
+.react-flow__node.selected .nw-node.svgshape, .react-flow__node.selected .nw-node.shape-circle { box-shadow: none; outline: 2px dashed var(--accent); outline-offset: 3px; }
+.nw-markers { position: absolute; width: 0; height: 0; }
+.selbar select { max-width: 130px; }
 
 .md > :first-child { margin-top: 0; }
 .md > :last-child { margin-bottom: 0; }

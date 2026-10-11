@@ -39,6 +39,14 @@ def _str(obj: dict, key: str, where: str, required: bool = False) -> None:
         raise CanvasError(f"{where}.{key} must be a string")
 
 
+def _style(obj: dict, where: str) -> None:
+    sa = obj.get("styleAttributes")
+    if sa is None:
+        return
+    if not isinstance(sa, dict) or not all(isinstance(v, (str, type(None))) for v in sa.values()):
+        raise CanvasError(f"{where}.styleAttributes must be an object of strings")
+
+
 def validate(doc) -> dict:
     """Return a normalized copy of doc (geometry rounded to integers) or raise
     CanvasError naming the first problem."""
@@ -77,6 +85,7 @@ def validate(doc) -> dict:
         if n["width"] < 1 or n["height"] < 1:
             raise CanvasError(f"{where} must have a positive size")
         _str(node, "color", where)
+        _style(node, where)
         if node["type"] == "text":
             _str(node, "text", where, required=True)
         elif node["type"] == "file":
@@ -111,6 +120,7 @@ def validate(doc) -> dict:
                 raise CanvasError(f"{where}.{key} must be one of {sorted(ENDS)}")
         _str(edge, "color", where)
         _str(edge, "label", where)
+        _style(edge, where)
 
     out["nodes"] = out_nodes
     out["edges"] = list(edges)

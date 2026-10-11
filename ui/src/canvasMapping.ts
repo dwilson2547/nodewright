@@ -1,8 +1,9 @@
 // JSON Canvas <-> React Flow. Each React Flow node/edge carries the original
 // JSON Canvas object in data.raw, so keys this editor doesn't understand
 // (style extensions, other tools' fields) survive every save.
-import { MarkerType, type Edge, type Node } from "@xyflow/react";
+import type { Edge, Node } from "@xyflow/react";
 import type { JsonCanvas } from "./api";
+import { attr, dashArray, lineWidth } from "./styles";
 
 export type Side = "top" | "right" | "bottom" | "left";
 export type CanvasNodeData = { raw: Record<string, any> };
@@ -46,12 +47,30 @@ function facingSides(a: Record<string, any>, b: Record<string, any>): [Side, Sid
   return dy > 0 ? ["bottom", "top"] : ["top", "bottom"];
 }
 
+// Edge routing (styleAttributes.pathfindingMethod) -> React Flow edge type.
+// Advanced Canvas's "a-star" routes around nodes; we draw rounded right
+// angles, which is the same shape without the obstacle avoidance.
+const ROUTES: Record<string, string> = { direct: "straight", square: "step", "a-star": "smoothstep" };
+
+/** Id of the <marker> drawing this arrow shape in this colour (see Markers). */
+export function markerId(arrow: string, color: string): string {
+  return `nwm-${arrow || "triangle"}-${color.replace(/[^0-9a-zA-Z]/g, "")}`;
+}
+
 export function edgeVisual(raw: Record<string, any>) {
   const color = resolveColor(raw.color) ?? DEFAULT_COLOR;
-  const marker = { type: MarkerType.ArrowClosed, color, width: 18, height: 18 };
+  const width = lineWidth(raw);
+  const path = attr(raw, "path");
+  const marker = markerId(attr(raw, "arrow"), color);
   return {
+    type: ROUTES[attr(raw, "pathfindingMethod")] ?? "default",
     label: raw.label || undefined,
-    style: { stroke: color, strokeWidth: 2 },
+    style: {
+      stroke: color,
+      strokeWidth: width,
+      strokeDasharray: dashArray(path, width),
+      strokeLinecap: path === "dotted" ? ("round" as const) : undefined,
+    },
     markerEnd: (raw.toEnd ?? "arrow") === "arrow" ? marker : undefined,
     markerStart: raw.fromEnd === "arrow" ? marker : undefined,
     labelBgStyle: { fill: "var(--bg)" },

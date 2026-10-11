@@ -17,7 +17,7 @@ from typing import Callable
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 
-from . import access, canvas_format, events, leases, layout
+from . import access, canvas_format, events, leases, layout, styles
 from .layout import GRID, GROUP_PAD, NODE_GAP, RANK_GAP, snap
 from .models import Canvas, CanvasRevision, User, utcnow
 
@@ -61,7 +61,14 @@ def auto_size(node: dict) -> tuple[int, int]:
     per_line = max(1, (w - 40) // CHAR_W)
     rows = sum(max(1, math.ceil(len(line) / per_line)) for line in lines)
     h = max(MIN_H, rows * LINE_H + 36)
+    # Shapes whose text area is smaller than their box (index.css paddings).
+    sx, sy = SHAPE_GROW.get((node.get(styles.KEY) or {}).get("shape"), (1, 1))
+    w, h = w * sx, h * sy
     return int(math.ceil(w / GRID) * GRID), int(math.ceil(h / GRID) * GRID)
+
+
+SHAPE_GROW = {"diamond": (1.9, 1.8), "circle": (1.4, 1.4), "parallelogram": (1.35, 1),
+              "predefined-process": (1.25, 1), "document": (1, 1.25), "database": (1, 1.5)}
 
 
 # --- geometry -----------------------------------------------------------------
@@ -155,6 +162,19 @@ def mutate(s: Session, user: User, canvas_id: str, who: leases.Holder,
 
 # --- operations (each is fn(data) for mutate) ---------------------------------
 
+def _clean_style(el: dict, table: dict, where: str) -> None:
+    if styles.KEY not in el:
+        return
+    try:
+        sa = styles.check(el[styles.KEY], table, where)
+    except ValueError as exc:
+        raise OpError(str(exc)) from None
+    if sa:
+        el[styles.KEY] = sa
+    else:
+        del el[styles.KEY]
+
+
 def _clean_node(raw: dict, ids: set[str]) -> dict:
     if not isinstance(raw, dict):
         raise OpError("each node must be an object")
@@ -164,6 +184,7 @@ def _clean_node(raw: dict, ids: set[str]) -> dict:
         raise OpError(f"node type must be one of {sorted(canvas_format.NODE_TYPES)}")
     if n["type"] == "text":
         n.setdefault("text", "")
+    _clean_style(n, styles.NODE, "node")
     if "id" in n:
         if not isinstance(n["id"], str) or not n["id"] or n["id"] in ids:
             raise OpError(f"node id {n.get('id')!r} is empty or already used")
@@ -180,6 +201,7 @@ def _clean_edge(raw: dict, ids: set[str]) -> dict:
     for k in ("fromNode", "toNode"):
         if k not in e:
             raise OpError(f"edge needs {k}")
+    _clean_style(e, styles.EDGE, "edge")
     if "id" in e:
         if not isinstance(e["id"], str) or not e["id"] or e["id"] in ids:
             raise OpError(f"edge id {e.get('id')!r} is empty or already used")
@@ -324,6 +346,19 @@ def update_elements(updates: list[dict]):
             for k, v in u["set"].items():
                 if k in IMMUTABLE:
                     raise OpError(f"{k} can't be changed; delete and re-add instead")
+                if k == styles.KEY and isinstance(v, dict):
+                    # Merged, so one attribute can change without restating the rest.
+                    edge = "fromNode" in target
+                    try:
+                        clean = styles.check(v, styles.EDGE if edge else styles.NODE,
+                                             "edge" if edge else "node")
+                    except ValueError as exc:
+                        raise OpError(str(exc)) from None
+                    merged = {**target.get(k, {}), **clean}
+                    target[k] = {a: b for a, b in merged.items() if a in clean or a not in v}
+                    if not target[k]:
+                        del target[k]
+                    continue
                 if v is None:
                     target.pop(k, None)
                 else:

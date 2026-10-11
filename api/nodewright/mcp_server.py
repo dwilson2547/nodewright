@@ -21,7 +21,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.streamable_http_manager import StreamableHTTPASGIApp
 from mcp.server.transport_security import TransportSecuritySettings
 
-from . import __version__, access, canvas_format, leases, ops, styleguide, tokens
+from . import __version__, access, canvas_format, leases, ops, styleguide, styles, tokens
 from .config import Settings
 from .db import Database
 from .models import Canvas, User, Workspace
@@ -39,8 +39,18 @@ grouped as tabs in workspaces. You are acting for the signed-in user who connect
 - Writing takes a short lock on the canvas so you and the user don't fight. If a
   canvas is locked by someone else, wait or ask the user; don't retry in a loop.
   For a long series of edits call lock_canvas first and unlock_canvas when done.
+- Shapes and line styles are `styleAttributes` on nodes and edges (add_elements lists the
+  values): e.g. a decision is a text node with {"shape": "diamond", "textAlign": "center"},
+  an optional dependency an edge with {"path": "short-dashed"}.
 - The user sees your changes live in their browser.
 """
+
+NODE_STYLE = ("styleAttributes (optional object; omit a key for the default): "
+              + styles.describe(styles.NODE) + ". shape and textAlign apply to text nodes.")
+EDGE_STYLE = ("styleAttributes (optional object; omit a key for the default, a solid curved "
+              "2px line with a filled triangle): " + styles.describe(styles.EDGE)
+              + ". path is the dash pattern, pathfindingMethod the routing (direct = straight, "
+              "square/a-star = right angles), arrow the arrowhead shape on whichever ends have one.")
 
 Direction = Literal["TB", "LR"]
 SCHEME = "Bearer"
@@ -163,12 +173,13 @@ def build(db: Database, settings: Settings) -> tuple[MCPServer, ASGIApp]:
                                      "link (`url`), file (`file`) or group (`label`). Optional: "
                                      "id, color ('1'-'6' or '#rrggbb'), group (id of a group "
                                      "node to put it in), x/y/width/height (omit to auto-place "
-                                     "and auto-size).")] = [],  # noqa: B006
+                                     "and auto-size). " + NODE_STYLE)] = [],  # noqa: B006
                      edges: Annotated[list[dict], Field(
                          description="Edges to add: fromNode, toNode (ids, existing or from "
                                      "`nodes`). Optional: id, label, color, fromEnd/toEnd "
                                      "('none'|'arrow', default toEnd arrow), fromSide/toSide "
-                                     "(top|right|bottom|left; omit to let the editor choose).")
+                                     "(top|right|bottom|left; omit to let the editor choose). "
+                                     + EDGE_STYLE)
                      ] = [],  # noqa: B006
                      direction: Direction = "TB") -> dict:
         """Add nodes and edges. Unpositioned nodes are laid out as a block in
@@ -183,8 +194,12 @@ def build(db: Database, settings: Settings) -> tuple[MCPServer, ASGIApp]:
                         updates: Annotated[list[dict], Field(
                             description="[{id, set: {key: value, other_key: null}, fit?: bool}] "
                                         "— null removes a key; fit:true resizes a node to its "
-                                        "text. id and type can't change.")]) -> dict:
-        """Change existing nodes or edges: text, colour, label, geometry, ends, sides."""
+                                        "text. id and type can't change. styleAttributes is "
+                                        "merged: {styleAttributes: {shape: 'diamond'}} changes "
+                                        "only the shape, {styleAttributes: {path: null}} resets "
+                                        "one attribute.")]) -> dict:
+        """Change existing nodes or edges: text, colour, label, geometry, ends, sides,
+        styleAttributes (see add_elements for the values)."""
         return write(ctx, canvas_id, ops.update_elements(updates))
 
     @server.tool()

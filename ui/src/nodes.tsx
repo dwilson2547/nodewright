@@ -1,7 +1,8 @@
-import { createContext, memo, useContext, useEffect, useRef, useState, type CSSProperties } from "react";
+import { createContext, memo, useContext, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Handle, NodeResizer, Position, useReactFlow, type NodeProps } from "@xyflow/react";
 import { resolveColor, type CNode } from "./canvasMapping";
 import { Markdown, safeUrl } from "./markdown";
+import { attr } from "./styles";
 
 const SIDES: [string, Position][] = [
   ["top", Position.Top],
@@ -25,6 +26,32 @@ function Handles() {
 function colorStyle(raw: Record<string, any>): CSSProperties {
   const c = resolveColor(raw.color);
   return c ? ({ "--node-color": c } as CSSProperties) : {};
+}
+
+// Shapes CSS can't draw are an SVG outline in a 100x100 box stretched over
+// the node; the strokes keep their width (vector-effect in index.css).
+const OUTLINES: Record<string, ReactNode> = {
+  diamond: <polygon points="50,0 100,50 50,100 0,50" />,
+  parallelogram: <polygon points="15,0 100,0 85,100 0,100" />,
+  "predefined-process": <><rect x="0" y="0" width="100" height="100" /><path className="line" d="M8 0V100M92 0V100" /></>,
+  document: <path d="M0 0H100V86C80 72 62 98 36 95C18 93 8 87 0 89Z" />,
+  database: <><path d="M0 10A50 10 0 0 1 100 10V90A50 10 0 0 1 0 90Z" /><path className="line" d="M0 10A50 10 0 0 0 100 10" /></>,
+};
+
+/** Class names and outline for a node's style attributes (styles.ts). */
+function look(raw: Record<string, any>, kind: string, shapes = false) {
+  const shape = shapes ? attr(raw, "shape") : "";
+  const border = attr(raw, "border");
+  const align = attr(raw, "textAlign");
+  const outline = OUTLINES[shape];
+  let cls = `nw-node nw-${kind}`;
+  if (shape) cls += ` shaped shape-${shape}` + (outline ? " svgshape" : "");
+  if (border) cls += ` border-${border}`;
+  if (align) cls += ` align-${align}`;
+  const svg = outline ? (
+    <svg className="nw-outline" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">{outline}</svg>
+  ) : null;
+  return { cls, svg };
 }
 
 /** True while someone else holds the canvas's edit lease. */
@@ -79,8 +106,10 @@ function Editor({ value, onChange, onCommit, onCancel, multiline }: {
 export const TextNode = memo(({ id, data, selected }: NodeProps<CNode>) => {
   const raw = data.raw;
   const ed = useEditable(id, raw, "text");
+  const { cls, svg } = look(raw, "text", true);
   return (
-    <div className="nw-node nw-text" style={colorStyle(raw)} onDoubleClick={ed.start}>
+    <div className={cls} style={colorStyle(raw)} onDoubleClick={ed.start}>
+      {svg}
       <NodeResizer isVisible={selected} minWidth={40} minHeight={30} />
       <Handles />
       {ed.editing ? (
@@ -98,7 +127,7 @@ export const GroupNode = memo(({ id, data, selected }: NodeProps<CNode>) => {
   const raw = data.raw;
   const ed = useEditable(id, raw, "label");
   return (
-    <div className="nw-node nw-group" style={colorStyle(raw)}>
+    <div className={look(raw, "group").cls} style={colorStyle(raw)}>
       <NodeResizer isVisible={selected} minWidth={60} minHeight={60} />
       <Handles />
       <div className="nw-group-label" onDoubleClick={ed.start}>
@@ -117,7 +146,7 @@ export const LinkNode = memo(({ id, data, selected }: NodeProps<CNode>) => {
   const ed = useEditable(id, raw, "url");
   const href = safeUrl(raw.url ?? "");
   return (
-    <div className="nw-node nw-link" style={colorStyle(raw)} onDoubleClick={ed.start}>
+    <div className={look(raw, "link").cls} style={colorStyle(raw)} onDoubleClick={ed.start}>
       <NodeResizer isVisible={selected} minWidth={80} minHeight={30} />
       <Handles />
       {ed.editing ? (
@@ -140,7 +169,7 @@ export const FileNode = memo(({ id, data, selected }: NodeProps<CNode>) => {
   const raw = data.raw;
   const ed = useEditable(id, raw, "file");
   return (
-    <div className="nw-node nw-file" style={colorStyle(raw)} onDoubleClick={ed.start}>
+    <div className={look(raw, "file").cls} style={colorStyle(raw)} onDoubleClick={ed.start}>
       <NodeResizer isVisible={selected} minWidth={80} minHeight={30} />
       <Handles />
       {ed.editing ? (

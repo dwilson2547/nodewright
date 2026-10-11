@@ -35,6 +35,27 @@ import {
   type CNode,
 } from "./canvasMapping";
 import { nodeTypes, ReadOnly } from "./nodes";
+import { Markers } from "./markers";
+import {
+  EDGE_ARROWS, EDGE_PATHS, EDGE_ROUTES, LINE_WIDTHS, NODE_BORDERS, NODE_SHAPES, TEXT_ALIGN,
+  attr, withAttr, type Option,
+} from "./styles";
+
+function Pick({ title, options, value, onChange }: {
+  title: string; options: Option[]; value: string; onChange: (v: string) => void;
+}) {
+  return (
+    <select title={title} aria-label={title} value={value} onChange={(e) => onChange(e.target.value)}>
+      {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+    </select>
+  );
+}
+
+/** The value all of `raws` share for a style attribute, or "" if they differ. */
+function common(raws: Record<string, any>[], key: string): string {
+  const vals = new Set(raws.map((r) => attr(r, key)));
+  return vals.size === 1 ? Array.from(vals)[0] : "";
+}
 
 export type SaveStatus = "loading" | "saved" | "unsaved" | "saving" | "conflict" | "locked" | "error";
 export type EditorHandle = { flush: () => Promise<boolean>; exportDoc: () => JsonCanvas | null };
@@ -460,6 +481,20 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
     for (const e of selEdges) updateEdgeRaw(e.id, { color });
   };
 
+  const setNodeAttr = (key: string, value: string, only?: (n: CNode) => boolean) => {
+    const ids = new Set(selNodes.filter((n) => !only || only(n)).map((n) => n.id));
+    setNodes((ns) => ns.map((n) => ids.has(n.id) ? { ...n, data: { raw: withAttr(n.data.raw, key, value) } } : n));
+  };
+
+  const setEdgeAttr = (key: string, value: string) => {
+    const ids = new Set(selEdges.map((e) => e.id));
+    setEdges((es) => es.map((e) => {
+      if (!ids.has(e.id)) return e;
+      const raw = withAttr(e.data!.raw, key, value);
+      return { ...e, data: { raw }, ...edgeVisual(raw) };
+    }));
+  };
+
   const deleteSelection = () => {
     void flow.deleteElements({ nodes: selNodes, edges: selEdges });
   };
@@ -493,6 +528,9 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
   if (loadError) return <div className="center-msg">Couldn't open this canvas: {loadError}</div>;
 
   const oneEdge = selEdges.length === 1 && selNodes.length === 0 ? selEdges[0] : null;
+  const nodeRaws = selNodes.map((n) => n.data.raw);
+  const textRaws = nodeRaws.filter((r) => r.type === "text");
+  const edgeRaws = selEdges.map((e) => e.data!.raw);
 
   return (
     <ReadOnly.Provider value={readOnly}>
@@ -555,6 +593,32 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
               <button key={k} className="swatch" style={{ background: c }} title={`Preset ${k}`} onClick={() => setColor(k)} />
             ))}
             <input type="color" title="Custom colour" onChange={(e) => setColor(e.target.value)} />
+            {textRaws.length > 0 && (
+              <>
+                <span className="sep" />
+                <Pick title="Shape" options={NODE_SHAPES} value={common(textRaws, "shape")}
+                  onChange={(v) => setNodeAttr("shape", v, (n) => n.data.raw.type === "text")} />
+                <Pick title="Text alignment" options={TEXT_ALIGN} value={common(textRaws, "textAlign")}
+                  onChange={(v) => setNodeAttr("textAlign", v, (n) => n.data.raw.type === "text")} />
+              </>
+            )}
+            {nodeRaws.length > 0 && (
+              <Pick title="Border" options={NODE_BORDERS} value={common(nodeRaws, "border")}
+                onChange={(v) => setNodeAttr("border", v)} />
+            )}
+            {edgeRaws.length > 0 && (
+              <>
+                <span className="sep" />
+                <Pick title="Line style" options={EDGE_PATHS} value={common(edgeRaws, "path")}
+                  onChange={(v) => setEdgeAttr("path", v)} />
+                <Pick title="Line width" options={LINE_WIDTHS} value={common(edgeRaws, "lineWidth")}
+                  onChange={(v) => setEdgeAttr("lineWidth", v)} />
+                <Pick title="Routing" options={EDGE_ROUTES} value={common(edgeRaws, "pathfindingMethod")}
+                  onChange={(v) => setEdgeAttr("pathfindingMethod", v)} />
+                <Pick title="Arrowhead" options={EDGE_ARROWS} value={common(edgeRaws, "arrow")}
+                  onChange={(v) => setEdgeAttr("arrow", v)} />
+              </>
+            )}
             {oneEdge && (
               <>
                 <span className="sep" />
@@ -595,6 +659,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
           <Panel position="bottom-center" className="banner warn">Couldn't save — retrying…</Panel>
         )}
       </ReactFlow>
+      <Markers edges={edges} />
       {labelEdit && (
         <input
           className="label-edit"
