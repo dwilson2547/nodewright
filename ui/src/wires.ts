@@ -29,11 +29,40 @@ type WNode = Box & {
   caption?: Box;
   /** Being dragged: only the wires on it are re-routed until it's dropped. */
   drag?: true;
+  /** A ground symbol: its net is "gnd". */
+  ground?: true;
 };
 type WEdge = { id: string; source: string; target: string; sp: string | null; tp: string | null; label?: string };
 type Input = { nodes: WNode[]; edges: WEdge[] };
 
-export type Wire = { d: string; label: Pt; dots: Pt[] };
+export type Wire = { d: string; label: Pt; dots: Pt[]; /** The net's colour, for colour by net. */ color: string };
+
+// Colour by net (design §17): each net gets a colour from its name, so it
+// stays put as parts move. Ground stays the default grey.
+const NET_COLOURS = ["#e5484d", "#f76b15", "#c99a06", "#30a46c", "#12a594", "#0091ff", "#3e63dd", "#8e4ec6", "#d6409f", "#a0715a"];
+const GROUND = "#8a8f98";
+
+function preferred(name: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < name.length; i++) h = Math.imul(h ^ name.charCodeAt(i), 0x01000193);
+  return (h >>> 0) % NET_COLOURS.length;
+}
+
+/** A colour per net name: each takes the colour its name hashes to, or the
+ * next one no other net on the canvas has, so neighbours rarely match;
+ * colours repeat only once every one is in use. */
+function colours(names: string[]): Map<string, string> {
+  const out = new Map<string, string>();
+  const used = new Set<number>();
+  for (const name of [...new Set(names)].sort()) {
+    if (name === "gnd") { out.set(name, GROUND); continue; }
+    let i = preferred(name);
+    if (used.size < NET_COLOURS.length) while (used.has(i)) i = (i + 1) % NET_COLOURS.length;
+    used.add(i);
+    out.set(name, NET_COLOURS[i]);
+  }
+  return out;
+}
 
 function kindOf(raw: Record<string, any> | undefined, type: string | undefined): WNode["kind"] {
   if (type === "group") return "group";
@@ -72,6 +101,7 @@ export function wireKey(s: ReactFlowState): string {
       ports: kind === "other" || kind === "group" ? [] : portsOf(raw),
       ...(kind === "net" ? { net: String(raw?.text ?? "").trim().toLowerCase() } : {}),
       ...(n.dragging ? { drag: true as const } : {}),
+      ...(kind === "symbol" && /^icons\/sym-ground\//.test(String(raw?.icon)) ? { ground: true as const } : {}),
     });
     const node = nodes[nodes.length - 1];
     if (kind === "symbol" && raw?.text) node.caption = captionBox(node, raw);
@@ -293,7 +323,25 @@ function nets(nodes: Map<string, WNode>, edges: WEdge[]) {
     return `p:${nodeId}:${port}`;
   };
   for (const e of edges) union(pinKey(e.source, e.sp!), pinKey(e.target, e.tp!));
-  return { netOf: (e: WEdge) => find(pinKey(e.source, e.sp!)), pinKey };
+  // A net's name: a net label's, "gnd" if it reaches a ground symbol, else its
+  // first pin, so the name (and colour) holds while unrelated wires change.
+  const names = new Map<string, string>();
+  const rank = (k: string) => (k.startsWith("n:") ? 0 : k === "gnd" ? 1 : 2);
+  const offer = (root: string, k: string) => {
+    const was = names.get(root);
+    if (was === undefined || rank(k) < rank(was) || (rank(k) === rank(was) && k < was)) names.set(root, k);
+  };
+  for (const e of edges) {
+    for (const [node, port] of [[e.source, e.sp!], [e.target, e.tp!]] as const) {
+      const k = pinKey(node, port);
+      offer(find(k), nodes.get(node)?.ground ? "gnd" : k);
+    }
+  }
+  const nameOf = (e: WEdge) => {
+    const n = names.get(find(pinKey(e.source, e.sp!))) ?? "";
+    return n.startsWith("n:") ? n.slice(2) : n;
+  };
+  return { netOf: (e: WEdge) => find(pinKey(e.source, e.sp!)), pinKey, nameOf };
 }
 
 function segs(pts: Pt[]): Seg[] {
@@ -306,7 +354,7 @@ function route(input: Input): Map<string, Wire> {
     .filter((n) => n.kind !== "group" && n.w > 0 && n.h > 0)
     .flatMap((n) => [n, ...(n.caption ? [n.caption] : [])])
     .map((b) => ({ x0: b.x, y0: b.y, x1: b.x + b.w, y1: b.y + b.h }));
-  const { netOf, pinKey } = nets(nodes, input.edges);
+  const { netOf, pinKey, nameOf } = nets(nodes, input.edges);
 
   type Job = { e: WEdge; s: Pt; ss: Side; t: Pt; ts: Side; net: string };
   const jobs: Job[] = [];
@@ -389,10 +437,12 @@ function route(input: Input): Map<string, Wire> {
     dots.set(group[0].id, list);
   }
 
+  const palette = colours(done.map((d) => nameOf(d.job.e)));
   const out = new Map<string, Wire>();
   for (const { job, pts } of done) {
     const label = job.e.label ? labelPoint(pts, String(job.e.label).length * 6 + 12, 18, obstacles, []) : pts[0];
-    out.set(job.e.id, { d: hopPath(pts, hops.get(job.e.id) ?? []), label, dots: dots.get(job.e.id) ?? [] });
+    out.set(job.e.id, { d: hopPath(pts, hops.get(job.e.id) ?? []), label, dots: dots.get(job.e.id) ?? [],
+      color: palette.get(nameOf(job.e))! });
   }
   return out;
 }

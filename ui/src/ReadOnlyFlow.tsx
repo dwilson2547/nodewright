@@ -7,15 +7,19 @@ import {
   useReactFlow, type NodeChange,
 } from "@xyflow/react";
 import type { CEdge, CNode } from "./canvasMapping";
-import { RoutedEdge } from "./edges";
+import { NetColours, RoutedEdge } from "./edges";
 import { Markers } from "./markers";
 import { nodeTypes, ReadOnly } from "./nodes";
 
 const edgeTypes = { routed: RoutedEdge };
 
-type Props = { nodes: CNode[]; edges: CEdge[]; focus?: string; colorMode?: "light" | "system" };
+type Props = {
+  nodes: CNode[]; edges: CEdge[]; focus?: string; colorMode?: "light" | "system";
+  /** The document's colorByNet (wires.ts). */
+  colorByNet?: boolean;
+};
 
-export function ReadOnlyFlow({ nodes: initial, edges, focus, colorMode = "light" }: Props) {
+export function ReadOnlyFlow({ nodes: initial, edges, focus, colorMode = "light", colorByNet = false }: Props) {
   const flow = useReactFlow();
   // Seeded once: give each document its own ReactFlowProvider key.
   const [nodes, setNodes] = useState(initial);
@@ -36,6 +40,7 @@ export function ReadOnlyFlow({ nodes: initial, edges, focus, colorMode = "light"
   }, [flow, initial, focus]);
   return (
     <ReadOnly.Provider value={true}>
+    <NetColours.Provider value={colorByNet}>
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -56,6 +61,7 @@ export function ReadOnlyFlow({ nodes: initial, edges, focus, colorMode = "light"
         <Controls showInteractive={false} />
       </ReactFlow>
       <Markers edges={edges} />
+    </NetColours.Provider>
     </ReadOnly.Provider>
   );
 }

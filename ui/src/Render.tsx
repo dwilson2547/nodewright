@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { ConnectionMode, getNodesBounds, getViewportForBounds, ReactFlow, ReactFlowProvider, useReactFlow } from "@xyflow/react";
 import type { CanvasMeta } from "./api";
 import { toFlow, type CEdge, type CNode } from "./canvasMapping";
-import { RoutedEdge } from "./edges";
+import { NetColours, RoutedEdge } from "./edges";
 import { Markers } from "./markers";
 import { nodeTypes, ReadOnly } from "./nodes";
 import { setAttachmentUrl, TabLinksContext } from "./tablinks";
@@ -18,7 +18,7 @@ const ticket = q.get("t") ?? "";
 const focus = (q.get("focus") ?? "").split(",").filter(Boolean);
 
 
-type Loaded = { nodes: CNode[]; edges: CEdge[]; tabs: CanvasMeta[] };
+type Loaded = { nodes: CNode[]; edges: CEdge[]; tabs: CanvasMeta[]; colorByNet: boolean };
 
 function imagesSettled(timeoutMs: number): Promise<void> {
   const pending = [...document.images].filter((i) => !i.complete);
@@ -91,7 +91,7 @@ export default function Render() {
   useEffect(() => {
     fetch(`/api/render/${encodeURIComponent(canvasId)}?t=${encodeURIComponent(ticket)}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
-      .then((j) => setDoc({ ...toFlow(j.data), tabs: j.tabs ?? [] }))
+      .then((j) => setDoc({ ...toFlow(j.data), tabs: j.tabs ?? [], colorByNet: j.data?.colorByNet === true }))
       .catch((e) => setError(String(e)));
   }, []);
   if (error) return <div id="nw-render" data-ready="error" style={{ padding: 20 }}>Couldn't load the canvas: {error}</div>;
@@ -100,7 +100,9 @@ export default function Render() {
     <ReadOnly.Provider value={true}>
       <TabLinksContext.Provider value={{ tabs: doc.tabs, current: canvasId, open: () => undefined }}>
         <ReactFlowProvider>
-          <Shot doc={doc} />
+          <NetColours.Provider value={doc.colorByNet}>
+            <Shot doc={doc} />
+          </NetColours.Provider>
         </ReactFlowProvider>
       </TabLinksContext.Provider>
     </ReadOnly.Provider>

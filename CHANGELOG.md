@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.18.0 - 2026-10-11
+
+### Added
+- **Net colours** (editor toolbar, shown when a tab has wires): each wire takes its net's colour.
+  Net labels name a net, ground nets stay grey, and other nets keep their colour as you edit.
+  Neighbouring nets get different colours until all ten are in use. A wire you colour yourself
+  keeps its colour. Saved with the tab, so share links and previews show it too.
+
 ## 0.17.0 - 2026-10-11
 
 ### Added

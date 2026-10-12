@@ -92,3 +92,12 @@ def test_agent_builds_a_circuit(mcp):  # noqa: F811
         {"id": "d1", "icon": file["sym-diode"], "ports": [{"id": "x", "side": "top"}], "width": 40, "height": 40}])
     d1 = next(n for n in m.call("get_canvas", canvas_id=tab)["data"]["nodes"] if n["id"] == "d1")
     assert [p["id"] for p in d1["ports"]] == ["x"] and d1["width"] == 40
+
+
+def test_colour_by_net_is_kept_in_the_document(client):
+    from .conftest import H
+    ws = client.get("/api/workspaces").json()[0]["id"]
+    tab = client.get(f"/api/workspaces/{ws}/canvases").json()[0]["id"]
+    doc = {"colorByNet": True, "nodes": [], "edges": []}
+    assert client.put(f"/api/canvases/{tab}", json={"base_revision": 1, "data": doc}, headers=H).status_code == 200
+    assert client.get(f"/api/canvases/{tab}").json()["data"]["colorByNet"] is True

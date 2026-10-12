@@ -10,7 +10,7 @@ import { setAttachmentUrl, TabLinksContext } from "./tablinks";
 const token = decodeURIComponent(location.pathname.replace(/^\/s\//, "").split("/")[0] ?? "");
 const base = `/api/s/${encodeURIComponent(token)}`;
 
-type Shared = { id: string; name: string; workspace: string; tabs: CanvasMeta[]; nodes: CNode[]; edges: CEdge[] };
+type Shared = { id: string; name: string; workspace: string; tabs: CanvasMeta[]; nodes: CNode[]; edges: CEdge[]; colorByNet: boolean };
 
 async function load(canvasId?: string): Promise<Shared> {
   const r = await fetch(canvasId ? `${base}/canvases/${encodeURIComponent(canvasId)}` : base);
@@ -19,13 +19,13 @@ async function load(canvasId?: string): Promise<Shared> {
     throw new Error(detail ?? `HTTP ${r.status}`);
   }
   const j = await r.json();
-  return { ...j, ...toFlow(j.data) };
+  return { ...j, ...toFlow(j.data), colorByNet: j.data?.colorByNet === true };
 }
 
 function View({ doc, focus, open }: { doc: Shared; focus?: string; open: (id: string, node?: string) => void }) {
   return (
     <TabLinksContext.Provider value={{ tabs: doc.tabs, current: doc.id, open }}>
-      <ReadOnlyFlow nodes={doc.nodes} edges={doc.edges} focus={focus} />
+      <ReadOnlyFlow nodes={doc.nodes} edges={doc.edges} focus={focus} colorByNet={doc.colorByNet} />
     </TabLinksContext.Provider>
   );
 }

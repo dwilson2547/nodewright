@@ -22,6 +22,7 @@ import {
   useEdgesState,
   useNodesState,
   useReactFlow,
+  useStore,
   type Connection,
   type Edge,
   type Node,
@@ -33,7 +34,7 @@ import { endFields, flipped, orient, orientationOf, portsOf, turned, type Orient
 import { PortsPanel } from "./PortsPanel";
 import { HistoryPanel, when } from "./HistoryPanel";
 import { ReadOnlyFlow } from "./ReadOnlyFlow";
-import { isWireEdge } from "./wires";
+import { isWireEdge, wireKey } from "./wires";
 import {
   PRESETS,
   edgeEnds,
@@ -46,7 +47,7 @@ import {
 } from "./canvasMapping";
 import { isSymbol, netName, nodeTypes, ReadOnly, SchemaOps, SelectedNet } from "./nodes";
 import { formatForFile, SAMPLES, SCHEMA_FORMATS, type SchemaFormat } from "./schema";
-import { RoutedEdge } from "./edges";
+import { NetColours, RoutedEdge } from "./edges";
 import { Markers } from "./markers";
 import { canvasFile, TabLinksContext } from "./tablinks";
 import {
@@ -162,6 +163,9 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
   const [tplReload, setTplReload] = useState(0);
   const [portsOpen, setPortsOpen] = useState(false);
   const [head, setHead] = useState(0);
+  // The document's colorByNet (design §17); kept in `extra` like other top-level keys.
+  const [colorByNet, setColorByNet] = useState(false);
+  const hasWires = useStore(wireKey) !== "";
   const [previewed, setPreview] = useState<Preview | null>(null);
   const preview = historyOpen ? previewed : null; // closing the panel ends the preview
   const otherLease = lease && !isMine(lease) ? lease : null;
@@ -202,6 +206,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
 
   const apply = useCallback((doc: JsonCanvas) => {
     extra.current = splitDoc(doc);
+    setColorByNet(doc.colorByNet === true);
     const f = toFlow(doc);
     setNodes(f.nodes);
     setEdges(f.edges);
@@ -910,6 +915,20 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
     }
   };
 
+  // Colour by net is a document setting, so share links and renders match;
+  // turning it on or off is one undo step and saves like any edit.
+  const toggleNetColours = (on: boolean) => {
+    const before = serialize();
+    if (before !== current.current) undo.current.push(current.current);
+    const { colorByNet: _, ...rest } = extra.current;
+    extra.current = on ? { ...rest, colorByNet: true } : rest;
+    setColorByNet(on);
+    undo.current.push(before);
+    redo.current = [];
+    current.current = serialize();
+    void save();
+  };
+
   const addNetLabel = () => {
     const name = prompt("Net name", "VCC")?.trim();
     if (!name) return;
@@ -1004,6 +1023,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
     <ReadOnly.Provider value={readOnly}>
     <SchemaOps.Provider value={readOnly ? null : applySchema}>
     <SelectedNet.Provider value={net}>
+    <NetColours.Provider value={colorByNet}>
     <div className={"editor" + (readOnly ? " readonly" : "") + (paletteOpen && !preview ? " with-palette" : "")
       + (historyOpen ? " with-history" : "") + (dropping ? " drop-files" : "")}
       ref={wrapper} onDoubleClick={onPaneDoubleClick} onDragOver={onDragOver} onDragLeave={onDragLeave}
@@ -1080,6 +1100,11 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
           <span className="sep" />
           <button onClick={() => step(undo, redo)} title="Undo (Ctrl+Z)">↶</button>
           <button onClick={() => step(redo, undo)} title="Redo (Ctrl+Shift+Z)">↷</button>
+          {hasWires && (
+            <label className="check" title="Colour each wire by its net (set a wire's own colour to override)">
+              <input type="checkbox" checked={colorByNet} onChange={(e) => toggleNetColours(e.target.checked)} /> Net colours
+            </label>
+          )}
           <span className="sep" />
           <label className="check" title="Snap nodes to the grid while dragging">
             <input type="checkbox" checked={snap.on} onChange={(e) => setSnap({ ...snap, on: e.target.checked })} /> Snap
@@ -1216,7 +1241,8 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
       {preview && (
         <div className="preview-layer">
           <ReactFlowProvider key={preview.rev}>
-            <ReadOnlyFlow nodes={preview.nodes} edges={preview.edges} colorMode="system" />
+            <ReadOnlyFlow nodes={preview.nodes} edges={preview.edges} colorMode="system"
+              colorByNet={preview.data.colorByNet === true} />
           </ReactFlowProvider>
           <div className="banner preview-banner">
             <span>
@@ -1259,6 +1285,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
         />
       )}
     </div>
+    </NetColours.Provider>
     </SelectedNet.Provider>
     </SchemaOps.Provider>
     </ReadOnly.Provider>

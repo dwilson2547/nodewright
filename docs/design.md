@@ -229,7 +229,7 @@ of editor polish.
    ✅ node ports (0.11.0) → ✅ icons and built-in set (0.12.0) → ✅ icon creator (0.13.0) →
    ✅ schema nodes (0.14.0) → ✅ versions (0.15.0, §14; ✅ user: per tab, not per schema or per
    workspace) → ✅ schematic symbols, junctions and net labels (0.16.0, §15) → ✅ schematic wiring
-   (0.17.0, §16) → colour by net (✅ user: follow-up to wiring) → manual edge waypoints →
+   (0.17.0, §16) → ✅ colour by net (0.18.0, §17) → manual edge waypoints →
    organisations and roles.
 6. **Stretch:** marketplace (§11.5), custom roles.
 
@@ -263,7 +263,8 @@ updates, style guides, shapes and line styles, templates, tab links, attachments
 `authorize()` with a members table (no sharing UI). 0.7.0 added folders, read-only share links,
 Alembic migrations, CI and the unused-attachment sweep. 0.8.0 added workspace members, 0.9.0 workspace zip
 export, 0.10.0 edge corner radius, 0.11.0 node ports, 0.12.0 icons, 0.13.0 icon creator, 0.14.0
-schema nodes, 0.15.0 versions, 0.16.0 schematic symbols, 0.17.0 schematic wiring. Not yet: organisations, zip import. Live updates are in-process, so the chart must stay at
+schema nodes, 0.15.0 versions, 0.16.0 schematic symbols, 0.17.0 schematic wiring, 0.18.0 colour
+by net. Not yet: organisations, zip import. Live updates are in-process, so the chart must stay at
 one replica until `events.py` moves to Postgres LISTEN/NOTIFY.
 
 ## 11. Future: collaboration and community 📐
@@ -582,5 +583,21 @@ follow-up.
 - New wires (editor or agent) default to no arrowhead. Nothing about routing is stored: JSON
   Canvas has no waypoints, and Obsidian draws the same edges its own way.
 
-Not done: colour by net (next), wire-to-wire joins (attaching a wire to the middle of another),
+Not done: wire-to-wire joins (attaching a wire to the middle of another),
 waypoints, and stored routes for other readers.
+
+## 17. Colour by net ✅ (0.18.0, `wires.ts` colours, `edges.tsx` NetColours)
+
+A document setting, top-level `"colorByNet": true` (kept by `canvas_format` like any unknown
+top-level key), so share links, version previews and agent screenshots match the editor. The
+editor's **Net colours** toggle (shown when the tab has wires) is one undoable edit.
+
+- A wire with its own `color` keeps it; the rest take their net's colour.
+- A net's name (`wires.ts` nets): a net label's name if it has one, `gnd` if it reaches a ground
+  symbol (drawn in the default grey), else its alphabetically first pin. So colours hold while
+  unrelated wires change.
+- Ten colours. Nets are taken in name order; each gets the colour its name hashes to, or the next
+  one no other net on the canvas has, repeating only when all ten are in use. Adding a net can
+  shift a later net's colour; that trade was taken over same-coloured neighbours.
+
+Not done: agents can't toggle it (no tool sets top-level keys); a legend of nets and colours.

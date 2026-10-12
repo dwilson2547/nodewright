@@ -1,7 +1,7 @@
 // One edge type for every edge: picks the path for its pathfindingMethod and
 // steers around the other nodes on the canvas (routing.ts). Wires between
 // schematic parts are routed together instead (wires.ts).
-import { memo, useCallback, useMemo } from "react";
+import { createContext, memo, useCallback, useContext, useMemo } from "react";
 import {
   BaseEdge, getBezierPath, getSmoothStepPath, getStraightPath, useStore,
   type EdgeProps, type ReactFlowState,
@@ -71,7 +71,11 @@ function parse(key: string): [Rect[], Rect[]] {
 const labelBox = (label: unknown): [number, number] =>
   [String(label ?? "").length * 6 + 12, 18];
 
+/** The document's colorByNet: wires take their net's colour unless given one (wires.ts). */
+export const NetColours = createContext(false);
+
 export const RoutedEdge = memo((p: EdgeProps<CEdge>) => {
+  const byNet = useContext(NetColours);
   const method = attr(p.data?.raw ?? {}, "pathfindingMethod");
   const radius = cornerRadius(p.data?.raw ?? {});
   const select = useCallback((s: ReactFlowState) => obstacleKey(s, p.source, p.target),
@@ -109,6 +113,7 @@ export const RoutedEdge = memo((p: EdgeProps<CEdge>) => {
   }, [wire, method, radius, key, sx, sy, tx, ty, sSide, tSide, p.sourcePosition, p.targetPosition, p.label]);
 
   const width = Number(p.style?.strokeWidth) || 2;
+  const style = wire && byNet && !p.data?.raw?.color ? { ...p.style, stroke: wire.color } : p.style;
   return (
     <>
     {p.selected && <path d={path} className="nw-edge-halo" style={{ strokeWidth: width + 12 }} />}
@@ -130,12 +135,12 @@ export const RoutedEdge = memo((p: EdgeProps<CEdge>) => {
       labelBgBorderRadius={4}
       markerStart={p.markerStart}
       markerEnd={p.markerEnd}
-      style={p.style}
+      style={style}
       interactionWidth={p.interactionWidth}
     />
     {wire?.dots.map((d) => (
       <circle key={`${d.x},${d.y}`} className="nw-wire-dot" cx={d.x} cy={d.y} r={width + 1.5}
-        style={{ fill: p.style?.stroke }} />
+        style={{ fill: style?.stroke }} />
     ))}
     </>
   );
