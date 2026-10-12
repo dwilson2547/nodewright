@@ -1,5 +1,6 @@
 // One edge type for every edge: picks the path for its pathfindingMethod and
-// steers around the other nodes on the canvas (routing.ts).
+// steers around the other nodes on the canvas (routing.ts). Wires between
+// schematic parts are routed together instead (wires.ts).
 import { memo, useCallback, useMemo } from "react";
 import {
   BaseEdge, getBezierPath, getSmoothStepPath, getStraightPath, useStore,
@@ -8,6 +9,7 @@ import {
 import type { CEdge, CNode } from "./canvasMapping";
 import { bezierHits, labelPoint, midpoint, orthoRoute, polyPath, type Rect, type Side } from "./routing";
 import { attr, cornerRadius } from "./styles";
+import { wireKey, wiresFor } from "./wires";
 
 // A group's title sits above its box (.nw-group-label: 600 16px, 4px gap).
 const TITLE_H = 26;
@@ -75,10 +77,13 @@ export const RoutedEdge = memo((p: EdgeProps<CEdge>) => {
   const select = useCallback((s: ReactFlowState) => obstacleKey(s, p.source, p.target),
     [p.source, p.target]);
   const key = useStore(select);
+  const wires = useStore(wireKey);
+  const wire = useMemo(() => wiresFor(wires).get(p.id), [wires, p.id]);
   const { sourceX: sx, sourceY: sy, targetX: tx, targetY: ty } = p;
   const sSide = p.sourcePosition as Side, tSide = p.targetPosition as Side;
 
   const [path, lx, ly] = useMemo((): [string, number, number] => {
+    if (wire) return [wire.d, wire.label.x, wire.label.y];
     const base = { sourceX: sx, sourceY: sy, targetX: tx, targetY: ty,
       sourcePosition: p.sourcePosition, targetPosition: p.targetPosition };
     if (method === "direct") {
@@ -101,7 +106,7 @@ export const RoutedEdge = memo((p: EdgeProps<CEdge>) => {
     }
     const [d, x, y] = getBezierPath(base);
     return [d, x, y];
-  }, [method, radius, key, sx, sy, tx, ty, sSide, tSide, p.sourcePosition, p.targetPosition, p.label]);
+  }, [wire, method, radius, key, sx, sy, tx, ty, sSide, tSide, p.sourcePosition, p.targetPosition, p.label]);
 
   const width = Number(p.style?.strokeWidth) || 2;
   return (
@@ -128,6 +133,10 @@ export const RoutedEdge = memo((p: EdgeProps<CEdge>) => {
       style={p.style}
       interactionWidth={p.interactionWidth}
     />
+    {wire?.dots.map((d) => (
+      <circle key={`${d.x},${d.y}`} className="nw-wire-dot" cx={d.x} cy={d.y} r={width + 1.5}
+        style={{ fill: p.style?.stroke }} />
+    ))}
     </>
   );
 });

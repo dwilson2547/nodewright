@@ -33,6 +33,7 @@ import { endFields, flipped, orient, orientationOf, portsOf, turned, type Orient
 import { PortsPanel } from "./PortsPanel";
 import { HistoryPanel, when } from "./HistoryPanel";
 import { ReadOnlyFlow } from "./ReadOnlyFlow";
+import { isWireEdge } from "./wires";
 import {
   PRESETS,
   edgeEnds,
@@ -778,8 +779,10 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
 
   const onConnect = useCallback((c: Connection) => {
     const raw = ends(c, { id: newId() });
+    // A wire between schematic parts has no arrowhead (wires.ts).
+    if (isWireEdge(raw, flow.getNode(c.source)?.data.raw, flow.getNode(c.target)?.data.raw)) raw.toEnd = "none";
     setEdges((es) => addEdge({ ...c, id: raw.id, data: { raw }, ...edgeVisual(raw) }, es));
-  }, [setEdges, ends]);
+  }, [setEdges, ends, flow]);
 
   const onReconnect = useCallback((old: Edge, c: Connection) => {
     setEdges((es) => {
@@ -1096,10 +1099,13 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
             {textRaws.length > 0 && (
               <>
                 <span className="sep" />
-                <Pick title="Shape" options={NODE_SHAPES} value={common(textRaws, "shape")}
-                  onChange={(v) => setNodeAttr("shape", v, (n) => n.data.raw.type === "text")} />
-                <Pick title="Text alignment" options={TEXT_ALIGN} value={common(textRaws, "textAlign")}
-                  onChange={(v) => setNodeAttr("textAlign", v, (n) => n.data.raw.type === "text")} />
+                {/* A symbol's shape is its drawing, and its caption is centred under it. */}
+                {textRaws.some((r) => !isSymbol(r)) && <>
+                  <Pick title="Shape" options={NODE_SHAPES} value={common(textRaws.filter((r) => !isSymbol(r)), "shape")}
+                    onChange={(v) => setNodeAttr("shape", v, (n) => n.data.raw.type === "text" && !isSymbol(n.data.raw))} />
+                  <Pick title="Text alignment" options={TEXT_ALIGN} value={common(textRaws.filter((r) => !isSymbol(r)), "textAlign")}
+                    onChange={(v) => setNodeAttr("textAlign", v, (n) => n.data.raw.type === "text" && !isSymbol(n.data.raw))} />
+                </>}
                 {textRaws.some((r) => r.icon) && <>
                   <Pick title="Icon colours" options={ICON_COLORS} value={common(textRaws.filter((r) => r.icon), "iconColors")}
                     onChange={(v) => setNodeAttr("iconColors", v, (n) => !!n.data.raw.icon)} />

@@ -153,6 +153,13 @@ const NET_FLIPPED = <polygon points="100,50 86,0 0,0 0,100 86,100" />;
 /** A text node showing an icon with pins: a schematic symbol (design §15). */
 export const isSymbol = (raw: Record<string, any>) => !!raw.icon && portsOf(raw).length > 0;
 
+/** Which side of a symbol its caption goes on: the first with no pins, below
+ * first, so a wire never has to run through it (wires.ts treats it as a part). */
+export function captionSide(raw: Record<string, any>): Port["side"] {
+  const used = new Set(portsOf(raw).map((p) => p.side));
+  return (["bottom", "right", "left", "top"] as const).find((s) => !used.has(s)) ?? "bottom";
+}
+
 /** Class names and outline for a node's style attributes (styles.ts). */
 function look(raw: Record<string, any>, kind: string, shapes = false) {
   const shape = shapes ? attr(raw, "shape") : "";
@@ -251,11 +258,11 @@ function SymbolNode({ id, raw, selected, cls }: { id: string; raw: Record<string
       <NodeResizer isVisible={selected} minWidth={12} minHeight={12} keepAspectRatio />
       <Handles id={id} raw={raw} />
       {ed.editing ? (
-        <div className="nw-symbol-caption editing">
+        <div className={`nw-symbol-caption at-${captionSide(raw)} editing`}>
           <Editor value={ed.draft} onChange={ed.setDraft} onCommit={ed.commit} onCancel={ed.cancel} multiline />
         </div>
       ) : raw.text ? (
-        <div className="nw-symbol-caption"><Markdown text={raw.text} /></div>
+        <div className={`nw-symbol-caption at-${captionSide(raw)}`}><Markdown text={raw.text} /></div>
       ) : null}
     </div>
   );

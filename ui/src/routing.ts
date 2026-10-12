@@ -11,8 +11,8 @@ export type Side = "top" | "right" | "bottom" | "left";
 export const MARGIN = 20;
 const BEND = 60;
 const REACH = 400; // obstacles further than this outside the endpoints' box are ignored
-const DIRS: Pt[] = [{ x: 1, y: 0 }, { x: 0, y: 1 }, { x: -1, y: 0 }, { x: 0, y: -1 }];
-const SIDE_DIR: Record<Side, number> = { right: 0, bottom: 1, left: 2, top: 3 };
+export const DIRS: Pt[] = [{ x: 1, y: 0 }, { x: 0, y: 1 }, { x: -1, y: 0 }, { x: 0, y: -1 }];
+export const SIDE_DIR: Record<Side, number> = { right: 0, bottom: 1, left: 2, top: 3 };
 
 function blocks(r: Rect, a: Pt, b: Pt): boolean {
   // Does the axis-aligned segment a-b enter r's interior?
@@ -21,7 +21,7 @@ function blocks(r: Rect, a: Pt, b: Pt): boolean {
   return lx < r.x1 && hx > r.x0 && ly < r.y1 && hy > r.y0;
 }
 
-class Heap {
+export class Heap {
   private a: [number, number][] = [];
   get size() { return this.a.length; }
   push(k: number, v: number) {
@@ -129,7 +129,7 @@ export function orthoRoute(s: Pt, sSide: Side, t: Pt, tSide: Side, obstacles: Re
   return simplify(pts);
 }
 
-function simplify(pts: Pt[]): Pt[] {
+export function simplify(pts: Pt[]): Pt[] {
   const out: Pt[] = [];
   for (const p of pts) {
     if (out.length && out[out.length - 1].x === p.x && out[out.length - 1].y === p.y) continue;

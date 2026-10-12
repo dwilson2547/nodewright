@@ -222,7 +222,7 @@ def _symbol(n: dict, icon_ports: IconPorts | None, given: set[str]) -> None:
                 sa = n.setdefault(styles.KEY, {})
                 sa.setdefault("border", "invisible")
         elif (n.get(styles.KEY) or {}).get("shape") == "net":
-            n["ports"] = [dict(NET_PORT)]
+            n["ports"] = ports.reorient([dict(NET_PORT)], (0, False), ports.orientation(n.get(styles.KEY)))
 
 
 def _clean_node(raw: dict, ids: set[str], icon_ports: IconPorts | None = None) -> dict:
@@ -305,6 +305,23 @@ def _clean_edge(raw: dict, ids: set[str]) -> dict:
         e["id"] = new_id()
     ids.add(e["id"])
     return e
+
+
+def _schematic(n: dict | None) -> bool:
+    """A symbol (an icon with pins) or a net label (design §15)."""
+    if not n or n.get("type", "text") != "text" or not n.get("ports"):
+        return False
+    return bool(n.get("icon")) or (n.get(styles.KEY) or {}).get("shape") == "net"
+
+
+def _wire_ends(data: dict, new_edges: list[dict]) -> None:
+    """A wire (pin to pin between schematic parts, design §16) has no
+    arrowhead unless one was asked for."""
+    nodes = {n["id"]: n for n in data["nodes"]}
+    for e in new_edges:
+        if ("toEnd" not in e and "fromPort" in e and "toPort" in e
+                and _schematic(nodes.get(e["fromNode"])) and _schematic(nodes.get(e["toNode"]))):
+            e["toEnd"] = "none"
 
 
 def _ports(data: dict, checked: list[dict]) -> None:
@@ -400,6 +417,7 @@ def add_elements(nodes: list[dict], edges: list[dict], direction: str = "TB",
         data["nodes"] = new_groups + existing + others
         data["edges"] = data["edges"] + new_edges
         _ports(data, new_edges)
+        _wire_ends(data, new_edges)
         report = _schema_report(new)
         return {"node_ids": [n["id"] for n in new], "edge_ids": [e["id"] for e in new_edges],
                 **geometry(data, [n["id"] for n in new]), **({"schemas": report} if report else {})}

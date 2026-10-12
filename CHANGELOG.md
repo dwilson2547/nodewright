@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.17.0 - 2026-10-11
+
+### Added
+- Schematic wiring: lines from pin to pin between symbols, junctions and net labels are routed
+  as wires, all together. Right angles only, clear of every part (including the two they join)
+  and of symbol captions, avoiding crossings where a short detour does it and never running
+  along another net's wire.
+- Where wires of different nets cross, the horizontal one hops over the vertical one.
+- A dot where wires leaving the same pin split.
+- New wires have no arrowhead.
+
+### Changed
+- A symbol's caption goes on a side without pins (a vertical resistor's sits to its right).
+- The shape and text-alignment pickers no longer show for symbols.
+
+### Fixed
+- An agent-created net label that starts flipped had its pin on the wrong side.
+
 ## 0.16.0 - 2026-10-11
 
 ### Added

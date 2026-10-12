@@ -49,11 +49,14 @@ def test_agent_builds_a_circuit(mcp):  # noqa: F811
          "styleAttributes": {"rotate": "90"}},
         {"id": "j", "icon": file["sym-junction"]},
         {"id": "vcc", "text": "VCC", "styleAttributes": {"shape": "net"}},
+        {"id": "vin", "text": "VIN", "styleAttributes": {"shape": "net", "mirror": "horizontal"}},
     ], edges=[
         {"fromNode": "r1", "fromPort": "2", "toNode": "q1", "toPort": "C"},
         {"fromNode": "vcc", "fromPort": "net", "toNode": "r1", "toPort": "1"},
     ])
-    doc = {n["id"]: n for n in m.call("get_canvas", canvas_id=tab)["data"]["nodes"]}
+    got = m.call("get_canvas", canvas_id=tab)["data"]
+    assert all(e["toEnd"] == "none" for e in got["edges"])  # wires have no arrowheads
+    doc = {n["id"]: n for n in got["nodes"]}
     q1, r1 = doc["q1"], doc["r1"]
     assert (q1["width"], q1["height"]) == (80, 80) and q1["styleAttributes"]["border"] == "invisible"
     assert [p["id"] for p in q1["ports"]] == ["B", "C", "E"]
@@ -61,6 +64,7 @@ def test_agent_builds_a_circuit(mcp):  # noqa: F811
     assert [(p["id"], p["side"]) for p in r1["ports"]] == [("1", "top"), ("2", "bottom")]
     assert (doc["j"]["width"], doc["j"]["height"]) == (16, 16) and len(doc["j"]["ports"]) == 4
     assert doc["vcc"]["ports"] == [{"id": "net", "side": "left", "at": 0.5}]
+    assert doc["vin"]["ports"] == [{"id": "net", "side": "right", "at": 0.5}]  # created flipped
 
     # Turning the transistor moves its pins and the wire on C follows.
     m.call("update_elements", canvas_id=tab, updates=[{"id": "q1", "set": {"styleAttributes": {"rotate": "270"}}}])

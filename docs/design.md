@@ -228,8 +228,8 @@ of editor polish.
 5. **Next, in order** (✅ user, 2026-10-11): ✅ workspace zip export (0.9.0) → ✅ edge corner radius (0.10.0) →
    ✅ node ports (0.11.0) → ✅ icons and built-in set (0.12.0) → ✅ icon creator (0.13.0) →
    ✅ schema nodes (0.14.0) → ✅ versions (0.15.0, §14; ✅ user: per tab, not per schema or per
-   workspace) → ✅ schematic symbols, junctions and net labels (0.16.0, §15) → schematic wiring
-   mode (scope to discuss, ✅ user: after the pieces are in) → manual edge waypoints →
+   workspace) → ✅ schematic symbols, junctions and net labels (0.16.0, §15) → ✅ schematic wiring
+   (0.17.0, §16) → colour by net (✅ user: follow-up to wiring) → manual edge waypoints →
    organisations and roles.
 6. **Stretch:** marketplace (§11.5), custom roles.
 
@@ -263,7 +263,7 @@ updates, style guides, shapes and line styles, templates, tab links, attachments
 `authorize()` with a members table (no sharing UI). 0.7.0 added folders, read-only share links,
 Alembic migrations, CI and the unused-attachment sweep. 0.8.0 added workspace members, 0.9.0 workspace zip
 export, 0.10.0 edge corner radius, 0.11.0 node ports, 0.12.0 icons, 0.13.0 icon creator, 0.14.0
-schema nodes, 0.15.0 versions, 0.16.0 schematic symbols. Not yet: organisations, zip import. Live updates are in-process, so the chart must stay at
+schema nodes, 0.15.0 versions, 0.16.0 schematic symbols, 0.17.0 schematic wiring. Not yet: organisations, zip import. Live updates are in-process, so the chart must stay at
 one replica until `events.py` moves to Postgres LISTEN/NOTIFY.
 
 ## 11. Future: collaboration and community 📐
@@ -548,3 +548,39 @@ to be discussed once these are in use (it would touch the edge router, which sta
 
 Not done: a wiring mode (orthogonal routing that never crosses its own parts, wire-to-wire joins,
 splitting a wire with a junction), net-aware export, multi-unit parts and pin numbers.
+
+## 16. Schematic wiring ✅ (0.17.0, `ui/src/wires.ts`)
+
+✅ user, 2026-10-11: no strict no-crossing rule (dense circuits would become unroutable). The
+user's idea of colouring crossing wires differently was weighed against hops: recolouring would
+overwrite meaningful colours, change as parts move (and land in history), and needs more colours
+than the presets in dense areas. Hops were chosen; colour by net (stable, meaningful) is the
+follow-up.
+
+- **What's a wire:** an edge whose two ends name ports on schematic parts (symbols, junctions,
+  net labels), unless its `pathfindingMethod` is `direct`. Every other edge keeps the §3.2 router
+  unchanged (`routing.ts` only gained exports).
+- **Routed together:** `RoutedEdge` reads its path from `wiresFor(wireKey(store))`, one pass
+  over all wires per canvas state (cached by key). Shortest wires first; each is an orthogonal A*
+  (`wireRoute`) on lines 10 px outside every part *including its own two* and every symbol
+  caption, with a cost per bend (60), per crossing of another net's wire (100, about 100 px of
+  detour) and for running along one (2000, effectively barred, since it would look connected).
+  Wires of the same net may share a trunk. Blocked steps and costs are precomputed on the grid
+  per wire. Measured 2026-10-11 in the dev build: 60 resistors with 100 random wires, a
+  20-step drag plus the drop's full re-route, produced no task over 50 ms (the first version,
+  which checked every part and wire at each search step, took ~1.5 s per pass).
+- **While dragging,** wires not on a moving part keep their last settled routes; the drop
+  re-routes everything.
+- **Nets** (union-find): a wire joins its two pins, a junction joins all its pins, net labels
+  with the same name are one net.
+- **Hops:** where wires of different nets cross, the horizontal one jumps the vertical with a
+  5 px arc.
+- **Dots:** wires leaving the same pin share their first leg; where they part, a dot is drawn.
+  A junction symbol is its own dot.
+- **Captions** go on the first side of a symbol without pins (below, right, left, above), so a
+  vertical part's caption sits beside it.
+- New wires (editor or agent) default to no arrowhead. Nothing about routing is stored: JSON
+  Canvas has no waypoints, and Obsidian draws the same edges its own way.
+
+Not done: colour by net (next), wire-to-wire joins (attaching a wire to the middle of another),
+waypoints, and stored routes for other readers.

@@ -331,7 +331,11 @@ header button.on { border-color: var(--accent); color: var(--accent); }
 .nw-node.nw-symbol { overflow: visible; background: transparent; position: relative; border-width: 0; }
 .nw-symbol-art { position: absolute; inset: 0; display: flex; }
 .nw-symbol-art .nw-icon { margin: 0; width: 100%; height: 100%; }
-.nw-symbol-caption { position: absolute; top: calc(100% + 2px); left: 50%; transform: translateX(-50%); white-space: nowrap; font-size: 12px; line-height: 1.3; text-align: center; color: var(--fg); }
+.nw-symbol-caption { position: absolute; white-space: nowrap; font-size: 12px; line-height: 1.3; color: var(--fg); }
+.nw-symbol-caption.at-bottom { top: calc(100% + 2px); left: 50%; transform: translateX(-50%); text-align: center; }
+.nw-symbol-caption.at-top { bottom: calc(100% + 2px); left: 50%; transform: translateX(-50%); text-align: center; }
+.nw-symbol-caption.at-right { left: calc(100% + 4px); top: 50%; transform: translateY(-50%); }
+.nw-symbol-caption.at-left { right: calc(100% + 4px); top: 50%; transform: translateY(-50%); text-align: right; }
 .nw-symbol-caption p { margin: 0; }
 .nw-symbol-caption.editing { white-space: normal; width: max(140px, 100%); }
 .nw-symbol-caption.editing .nw-edit { width: 100%; min-height: 40px; }
@@ -343,6 +347,8 @@ header button.on { border-color: var(--accent); color: var(--accent); }
    box, so the handle itself has no size and wires meet the leads; the visible
    square (shown while pointing at the symbol or with it selected) and the
    grab area are a pseudo-element. */
-.nw-symbol .nw-handle.nw-port { width: 0; height: 0; min-width: 0; min-height: 0; border: none; background: transparent; opacity: 1; }
-.nw-symbol .nw-handle.nw-port::before { content: ""; position: absolute; left: -6px; top: -6px; width: 8px; height: 8px; border-radius: 2px; border: 2px solid transparent; }
-.react-flow__node:hover .nw-symbol .nw-handle.nw-port::before, .react-flow__node.selected .nw-symbol .nw-handle.nw-port::before { border-color: var(--accent); background: var(--node-bg); }
+.nw-symbol .nw-handle.nw-port, .shape-net .nw-handle.nw-port { width: 0; height: 0; min-width: 0; min-height: 0; border: none; background: transparent; opacity: 1; }
+.nw-symbol .nw-handle.nw-port::before, .shape-net .nw-handle.nw-port::before { content: ""; position: absolute; left: -6px; top: -6px; width: 8px; height: 8px; border-radius: 2px; border: 2px solid transparent; }
+.react-flow__node:hover :is(.nw-symbol, .shape-net) .nw-handle.nw-port::before, .react-flow__node.selected :is(.nw-symbol, .shape-net) .nw-handle.nw-port::before { border-color: var(--accent); background: var(--node-bg); }
+.nw-node.shape-net { border-width: 0; }
+.nw-wire-dot { pointer-events: none; }
