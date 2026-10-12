@@ -41,8 +41,17 @@ def test_org_members_get_org_access_and_admins_own(app_and_provider, client):
     assert dave.post("/api/workspaces", json={"name": "X", "org_id": oid}, headers=H).status_code == 404
     assert _ws(alice, "Plans")["role"] == "owner" and _ws(carol, "Plans")["role"] == "owner"
     assert "Plans" not in [w["name"] for w in dave.get("/api/workspaces").json()]
-    # The creator has no special rights once the org owns it.
-    assert bob.patch(f"/api/workspaces/{ws['id']}", json={"name": "Mine"}, headers=H).status_code == 403
+    # Its creator may rename it, but nothing more than any member.
+    assert ws["can_rename"] is True and _ws(carol, "Plans")["can_rename"] is True
+    renamed = bob.patch(f"/api/workspaces/{ws['id']}", json={"name": "Plans"}, headers=H)
+    assert renamed.status_code == 200 and renamed.json()["can_rename"] is True
+    assert bob.patch(f"/api/workspaces/{ws['id']}", json={"name": "Plans", "org_access": "none"},
+                     headers=H).status_code == 403
+    assert bob.delete(f"/api/workspaces/{ws['id']}", headers=H).status_code == 403
+    erin = sign_in(app, provider, "erin")
+    alice.post(f"/api/orgs/{oid}/members", json={"username": "erin", "role": "member"}, headers=H)
+    assert _ws(erin, "Plans")["can_rename"] is False
+    assert erin.patch(f"/api/workspaces/{ws['id']}", json={"name": "X"}, headers=H).status_code == 403
 
     # Viewer access for the org; a guest from outside added by name; explicit beats org access.
     assert alice.patch(f"/api/workspaces/{ws['id']}", json={"org_access": "viewer"}, headers=H).json()["role"] == "owner"

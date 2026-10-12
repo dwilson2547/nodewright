@@ -337,7 +337,7 @@ export default function App() {
         <strong className="brand">nodewright</strong>
         <span className="ws-name">{ws?.name}</span>
         {ws && !owner && <span className="muted" title={`Shared with you by ${ws.owner}`}>{ws.role} · {ws.owner}</span>}
-        {owner && <button onClick={renameWorkspace} title="Rename workspace">Rename</button>}
+        {ws?.can_rename && <button onClick={renameWorkspace} title="Rename workspace">Rename</button>}
         {owner && <button onClick={deleteWorkspace} title="Delete workspace">Delete</button>}
         <span className="grow" />
         <span className={"status s-" + status}>{STATUS_TEXT[status]}</span>

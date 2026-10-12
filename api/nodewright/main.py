@@ -24,11 +24,11 @@ from pydantic import AnyHttpUrl, BaseModel, ConfigDict
 from starlette.routing import Route
 
 from . import (__version__, access, attachments, auth, bundle, canvas_format, events, folders,
-               icons, leases, members, orgs, schemas, versions, mcp_server, oauth, oidc, render, shares, storage, styleguide,
+               icons, leases, library, members, orgs, schemas, versions, mcp_server, oauth, oidc, render, shares, storage, styleguide,
                svgsafe, templates, tokens)
 from .config import Settings
 from .db import Database
-from .models import (AccessToken, Attachment, Canvas, CanvasRevision, OAuthGrant, OrgMember, ShareLink, StyleGuide,
+from .models import (AccessToken, Attachment, Canvas, CanvasRevision, Icon, OAuthGrant, OrgMember, ShareLink, StyleGuide,
                      Template, User, Workspace, utcnow)
 
 log = logging.getLogger("nodewright")
@@ -75,6 +75,7 @@ class IconIn(BaseModel):
     tinted: bool = True
     ports: list[dict] = []
     source: dict | None = None
+    org_id: str | None = Field(default=None, max_length=32)
 
 
 class SchemaIn(BaseModel):
@@ -88,6 +89,8 @@ class IconPatch(BaseModel):
     tinted: bool | None = None
     ports: list[dict] | None = None
     source: dict | None = None
+    org_id: str | None = Field(default=None, max_length=32)
+    """Share with this org, or null to take it back (its author only; library.py)."""
 
 
 class RoleIn(BaseModel):
@@ -131,6 +134,13 @@ class TemplateIn(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     kind: str = Field(pattern="^(stencil|fragment|page)$")
     data: dict
+    org_id: str | None = Field(default=None, max_length=32)
+
+
+class TemplatePatch(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    org_id: str | None = Field(default=None, max_length=32)
+    """Share with this org, or null to take it back (its author only; library.py)."""
 
 
 class DefaultPageIn(BaseModel):
@@ -150,9 +160,10 @@ def _iso(dt: datetime) -> str:
     return dt.isoformat()
 
 
-def _ws_out(ws: Workspace, role: str = "owner") -> dict:
+def _ws_out(ws: Workspace, role: str = "owner", can_rename: bool | None = None) -> dict:
     org = ws.org
     return {"id": ws.id, "name": ws.name, "updated_at": _iso(ws.updated_at), "role": role,
+            "can_rename": role == "owner" if can_rename is None else can_rename,
             "owner": org.name if org else ws.owner.username,
             "org": {"id": org.id, "name": org.name, "access": ws.org_access} if org else None}
 
@@ -366,7 +377,8 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
     @app.get("/api/workspaces")
     def list_workspaces(user: User = Depends(user_dep), s: Session = Depends(session)):
         filed = folders.placements(s, user)
-        return [{**_ws_out(w, access.role_on(s, user, w)), "folder_id": filed.get(w.id)}
+        return [{**_ws_out(w, access.role_on(s, user, w), access.can(s, user, w, access.RENAME)),
+                 "folder_id": filed.get(w.id)}
                 for w in access.visible_workspaces(s, user)]
 
     @app.put("/api/workspaces/{ws_id}/folder")
@@ -427,12 +439,13 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
         s.add(Canvas(workspace_id=ws.id, name="Untitled", position=0, revision=1,
                      data=templates.page_data(s, user, None)))
         s.refresh(ws)
-        return _ws_out(ws, access.role_on(s, user, ws))
+        return _ws_out(ws, access.role_on(s, user, ws), access.can(s, user, ws, access.RENAME))
 
     @app.patch("/api/workspaces/{ws_id}")
     def patch_workspace(ws_id: str, body: WorkspacePatch, user: User = Depends(user_dep),
                         s: Session = Depends(session)):
-        ws = workspace_for(s, user, ws_id, access.MANAGE)
+        ws = workspace_for(s, user, ws_id,
+                           access.MANAGE if body.org_access is not None else access.RENAME)
         if body.name is not None:
             ws.name, ws.updated_at = body.name.strip(), utcnow()
         if body.org_access is not None:
@@ -443,7 +456,7 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
             s.flush()
             for (uid,) in s.execute(select(OrgMember.user_id).where(OrgMember.org_id == ws.org_id)).all():
                 orgs.lost_access(s, s.get(User, uid), ws.org_id)
-        return _ws_out(ws, access.role_on(s, user, ws))
+        return _ws_out(ws, access.role_on(s, user, ws), access.can(s, user, ws, access.RENAME))
 
     @app.post("/api/workspaces/{ws_id}/move")
     def move_workspace(ws_id: str, body: MoveIn, user: User = Depends(user_dep),
@@ -455,7 +468,8 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
             raise HTTPException(exc.status, str(exc)) from None
         s.refresh(ws)
         role = access.role_on(s, user, ws)
-        return {**_ws_out(ws, role or "none"), "can_see": role is not None}
+        return {**_ws_out(ws, role or "none", access.can(s, user, ws, access.RENAME)),
+                "can_see": role is not None}
 
     # --- organisations (orgs.py) ------------------------------------------------
 
@@ -531,6 +545,23 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
         except orgs.OrgError as exc:
             raise org_error(exc) from None
         return Response(status_code=204)
+
+    @app.get("/api/orgs/{org_id}/style-guide")
+    def get_org_style_guide(org_id: str, user: User = Depends(user_dep), s: Session = Depends(session)):
+        try:
+            _, role = orgs.get(s, user, org_id)
+        except orgs.OrgError as exc:
+            raise org_error(exc) from None
+        return {"text": styleguide.org_get(s, org_id), "can_edit": role == "admin"}
+
+    @app.put("/api/orgs/{org_id}/style-guide")
+    def put_org_style_guide(org_id: str, body: StyleGuideIn, user: User = Depends(user_dep),
+                            s: Session = Depends(session)):
+        try:
+            orgs.get(s, user, org_id, admin=True)
+        except orgs.OrgError as exc:
+            raise org_error(exc) from None
+        return {"text": styleguide.org_put(s, org_id, body.text), "can_edit": True}
 
     @app.delete("/api/workspaces/{ws_id}", status_code=204)
     def delete_workspace(ws_id: str, tasks: BackgroundTasks, user: User = Depends(user_dep),
@@ -838,31 +869,40 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
 
     # --- icons (icons.py, svgsafe.py) ----------------------------------------
 
-    def icon_error(exc: icons.IconError) -> HTTPException:
+    def icon_error(exc: icons.IconError | library.LibraryError) -> HTTPException:
         return HTTPException(exc.status, str(exc))
+
+    def icon_out(s: Session, user: User, i: Icon, names: dict[str, str] | None = None) -> dict:
+        return {**icons.out(i), **library.describe(s, user, i, names)}
 
     @app.get("/api/icons")
     def list_icons(user: User = Depends(user_dep), s: Session = Depends(session)):
         every = icons.builtins().values()
+        names = library.org_names(s, user)
         return {"builtin": [icons.out(b) for b in every if not icons.is_symbol(b["id"])],
                 "symbols": [icons.out(b) for b in every if icons.is_symbol(b["id"])],
-                "mine": [icons.out(i) for i in icons.mine(s, user)]}
+                "mine": [icon_out(s, user, i, names) for i in icons.mine(s, user)]}
 
     @app.post("/api/icons", status_code=201)
     def create_icon(body: IconIn, user: User = Depends(user_dep), s: Session = Depends(session)):
         try:
-            return icons.out(icons.create(s, user, body.name, body.svg, body.tinted, body.ports,
-                                          body.source))
+            return icon_out(s, user, icons.create(s, user, body.name, body.svg, body.tinted,
+                                                  body.ports, body.source, body.org_id))
         except icons.IconError as exc:
             raise icon_error(exc) from None
 
     @app.patch("/api/icons/{icon_id}")
     def patch_icon(icon_id: str, body: IconPatch, user: User = Depends(user_dep),
                    s: Session = Depends(session)):
+        fields = body.model_dump(exclude_unset=True)
         try:
             icon = icons.get_own(s, user, icon_id)
-            return icons.out(icons.update(icon, body.model_dump(exclude_unset=True)))
-        except icons.IconError as exc:
+            if "org_id" in fields:
+                library.share(s, user, icon, fields.pop("org_id"))
+            if fields:
+                icons.update(icon, fields)
+            return icon_out(s, user, icon)
+        except (icons.IconError, library.LibraryError) as exc:
             raise icon_error(exc) from None
 
     @app.delete("/api/icons/{icon_id}", status_code=204)
@@ -890,41 +930,56 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
     # After the .svg route, which would otherwise match here.
     @app.get("/api/icons/{icon_id}")
     def get_icon(icon_id: str, user: User = Depends(user_dep), s: Session = Depends(session)):
-        """One of your icons with its creator drawing, to edit it."""
+        """An icon you can edit, with its creator drawing."""
         try:
             icon = icons.get_own(s, user, icon_id)
         except icons.IconError as exc:
             raise icon_error(exc) from None
-        return {**icons.out(icon), "source": icon.source}
+        return {**icon_out(s, user, icon), "source": icon.source}
 
     # --- templates (templates.py) ------------------------------------------
 
+    def template_out(s: Session, user: User, t: Template, names: dict[str, str] | None = None) -> dict:
+        return {**templates.out(t), **library.describe(s, user, t, names)}
+
     @app.get("/api/templates")
     def list_templates(user: User = Depends(user_dep), s: Session = Depends(session)):
+        names = library.org_names(s, user)
         return {"templates": list(templates.BUILTIN.values())
-                + [templates.out(t) for t in templates.mine(s, user)],
+                + [template_out(s, user, t, names) for t in templates.mine(s, user)],
                 "default_page": templates.default_page_id(s, user)}
 
     @app.post("/api/templates", status_code=201)
     def create_template(body: TemplateIn, user: User = Depends(user_dep),
                         s: Session = Depends(session)):
         try:
-            return templates.out(templates.create(s, user, body.name, body.kind, body.data))
+            return template_out(s, user, templates.create(s, user, body.name, body.kind, body.data,
+                                                          body.org_id))
         except templates.TemplateError as exc:
             raise HTTPException(422, str(exc)) from None
 
     def own_template(s: Session, user: User, tid: str) -> Template:
+        """A template the user may change: their own, or an org's they author or admin."""
         t = s.get(Template, tid)
-        if t is None or t.owner_id != user.id:
+        if t is None or not library.can_see(s, user, t):
             raise HTTPException(404, "template not found")
+        if not library.can_edit(s, user, t):
+            raise HTTPException(403, "only its author or an org admin can change it")
         return t
 
     @app.patch("/api/templates/{tid}")
-    def rename_template(tid: str, body: NameIn, user: User = Depends(user_dep),
-                        s: Session = Depends(session)):
+    def patch_template(tid: str, body: TemplatePatch, user: User = Depends(user_dep),
+                       s: Session = Depends(session)):
         t = own_template(s, user, tid)
-        t.name, t.updated_at = body.name.strip(), utcnow()
-        return templates.out(t)
+        if body.name is not None:
+            t.name = body.name.strip()
+        if "org_id" in body.model_fields_set:
+            try:
+                library.share(s, user, t, body.org_id)
+            except library.LibraryError as exc:
+                raise HTTPException(exc.status, str(exc)) from None
+        t.updated_at = utcnow()
+        return template_out(s, user, t)
 
     @app.delete("/api/templates/{tid}", status_code=204)
     def delete_template(tid: str, user: User = Depends(user_dep), s: Session = Depends(session)):

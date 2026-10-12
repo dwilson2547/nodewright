@@ -9,12 +9,12 @@ A web diagram editor ("budget web Visio") whose document format is
 [JSON Canvas](https://jsoncanvas.org), so diagrams stay openable in Obsidian. It ships an MCP server so
 an agent can build diagrams on a user's behalf, and signs users in through the cluster's authentik.
 
-Status: **0.20.0 live** at https://nodewright.danwils.com — editor with shapes, line styles and corner radius, node ports, icons (built-in Lucide set,
+Status: **0.21.0 live** at https://nodewright.danwils.com — editor with shapes, line styles and corner radius, node ports, icons (built-in Lucide set,
 SVG upload and an icon creator), schema nodes (Avro, Protobuf, JSON, YAML, SQL) with a
 connection point per field, per-tab history with named versions, preview and restore, schematic symbols with junctions and
 net labels and right-angle wiring with hops at crossings and optional colour by net,
 edges that route around nodes or through waypoints you place, a `render_canvas` tool so agents can see what they drew,
-folders for workspaces, organisations and workspace members (editor/viewer), read-only share links,
+folders for workspaces, organisations with shared templates, icons and style guides, workspace members (editor/viewer), read-only share links,
 snap-to-grid, templates and default pages, links between tabs, image/file attachments;
 workspaces and tabs, autosave with conflict detection, `.canvas` import/export, workspace zip
 export, and the MCP server: agents build diagrams with

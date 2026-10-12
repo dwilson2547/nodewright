@@ -16,7 +16,8 @@ from sqlalchemy.orm import Session
 from .models import Canvas, OrgMember, User, Workspace, WorkspaceMember
 
 READ = "workspace.read"
-MANAGE = "workspace.manage"          # rename, delete
+MANAGE = "workspace.manage"          # delete, move, org access
+RENAME = "workspace.rename"
 CANVAS_CREATE = "canvas.create"
 CANVAS_EDIT = "canvas.edit"
 CANVAS_DELETE = "canvas.delete"
@@ -24,7 +25,7 @@ LEASE_BREAK = "lease.break"
 MEMBERS_MANAGE = "members.manage"
 
 ROLES: dict[str, frozenset[str]] = {
-    "owner": frozenset({READ, MANAGE, CANVAS_CREATE, CANVAS_EDIT, CANVAS_DELETE, LEASE_BREAK,
+    "owner": frozenset({READ, MANAGE, RENAME, CANVAS_CREATE, CANVAS_EDIT, CANVAS_DELETE, LEASE_BREAK,
                         MEMBERS_MANAGE}),
     "editor": frozenset({READ, CANVAS_CREATE, CANVAS_EDIT, CANVAS_DELETE, LEASE_BREAK}),
     "viewer": frozenset({READ}),
@@ -67,9 +68,18 @@ def role_on(s: Session, user: User, ws: Workspace) -> str | None:
     return max(roles, key=RANK.get) if roles else None
 
 
+def _allowed(user: User, ws: Workspace, role: str | None, action: str) -> bool:
+    if role is None:
+        return False
+    if action in ROLES.get(role, frozenset()):
+        return True
+    # Whoever made an org's workspace (or moved it in) may still rename it,
+    # while they can open it (✅ user, 2026-10-12).
+    return action == RENAME and ws.org_id is not None and ws.owner_id == user.id
+
+
 def can(s: Session, user: User, ws: Workspace, action: str) -> bool:
-    role = role_on(s, user, ws)
-    return role is not None and action in ROLES.get(role, frozenset())
+    return _allowed(user, ws, role_on(s, user, ws), action)
 
 
 def workspace(s: Session, user: User, ws_id: str, action: str = READ) -> Workspace:
@@ -77,7 +87,7 @@ def workspace(s: Session, user: User, ws_id: str, action: str = READ) -> Workspa
     role = role_on(s, user, ws) if ws is not None else None
     if role is None:
         raise Denied("workspace not found")
-    if action not in ROLES.get(role, frozenset()):
+    if not _allowed(user, ws, role, action):
         raise Denied("you can't do that in this workspace", 403)
     return ws
 

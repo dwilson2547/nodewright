@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.21.0 - 2026-10-12
+
+### Added
+- **Shared templates and icons:** use ⇄ on one of your templates or icons in the palette to share
+  it with an organisation. Everyone in the org can use it; you and the org's admins can rename,
+  edit or delete it. Shared items show dashed, with the org's name.
+- **Org style guide:** admins write one in the Organisations dialog. Agents drawing in the org's
+  workspaces get it alongside your own style guide (`get_style_guide`, optionally for one canvas).
+- Agents see which org a template or icon is shared with, and can save a template straight into
+  an org.
+
+### Changed
+- Whoever created an org's workspace (or moved it in) can rename it, not just the org's admins.
+
 ## 0.20.0 - 2026-10-12
 
 ### Added

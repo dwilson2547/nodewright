@@ -52,6 +52,8 @@ export type Workspace = {
   id: string; name: string; updated_at: string; role: Role;
   /** The owner's username, or the org's name for an org's workspace. */
   owner: string; folder_id?: string | null; org: WorkspaceOrg | null;
+  /** Owners, and whoever made an org's workspace (design §19). */
+  can_rename: boolean;
 };
 export type OrgRole = "admin" | "member";
 /** managed: named in the server's authentik group mapping, so it can't be renamed here. */
@@ -64,7 +66,7 @@ export type Icon = {
   editable: boolean;
   /** Built-in schematic symbols only (design §15): palette group and default size in px. */
   category?: string; size?: number;
-};
+} & LibraryInfo;
 export type SchemaParse = {
   name: string | null; error: string | null; text: string; height: number; ports: Port[];
   fields: { path: string; name: string; type: string; line: number }[];
@@ -113,7 +115,16 @@ export type NewToken = Token & { token: string; mcp_url: string };
 export type Grant = { id: string; client_name: string; created_at: string; last_used_at: string | null };
 export type StyleGuide = { text: string; is_default: boolean };
 export type TemplateKind = "stencil" | "fragment" | "page";
-export type Template = { id: string; name: string; kind: TemplateKind; builtin: boolean; data: JsonCanvas };
+/** On your own and org-shared templates and icons (design §20); absent on built-ins. */
+export type LibraryInfo = {
+  /** The org it's shared with, or null when it's only yours. */
+  org?: { id: string; name: string } | null;
+  /** You may rename, edit or delete it (its author, or an admin of its org). */
+  can_edit?: boolean;
+  /** You're its author, so you can share it with an org or take it back. */
+  mine?: boolean;
+};
+export type Template = { id: string; name: string; kind: TemplateKind; builtin: boolean; data: JsonCanvas } & LibraryInfo;
 export type Templates = { templates: Template[]; default_page: string };
 
 export const api = {
@@ -159,7 +170,7 @@ export const api = {
   getIcon: (id: string) => call<Icon & { source: unknown }>("GET", `/api/icons/${id}`),
   createIcon: (body: { name: string; svg: string; tinted: boolean; ports?: Port[]; source?: unknown }) =>
     call<Icon>("POST", "/api/icons", body),
-  patchIcon: (id: string, body: Partial<{ name: string; svg: string; tinted: boolean; ports: Port[]; source: unknown }>) =>
+  patchIcon: (id: string, body: Partial<{ name: string; svg: string; tinted: boolean; ports: Port[]; source: unknown; org_id: string | null }>) =>
     call<Icon>("PATCH", `/api/icons/${id}`, body),
   deleteIcon: (id: string) => call("DELETE", `/api/icons/${id}`),
   members: (wsId: string) => call<Members>("GET", `/api/workspaces/${wsId}/members`),
@@ -202,6 +213,11 @@ export const api = {
   createTemplate: (name: string, kind: TemplateKind, data: JsonCanvas) =>
     call<Template>("POST", "/api/templates", { name, kind, data }),
   renameTemplate: (id: string, name: string) => call<Template>("PATCH", `/api/templates/${id}`, { name }),
+  /** Share with an org, or null to make it yours alone again (its author only). */
+  shareTemplate: (id: string, org_id: string | null) => call<Template>("PATCH", `/api/templates/${id}`, { org_id }),
+  orgStyleGuide: (orgId: string) => call<{ text: string; can_edit: boolean }>("GET", `/api/orgs/${orgId}/style-guide`),
+  saveOrgStyleGuide: (orgId: string, text: string) =>
+    call<{ text: string; can_edit: boolean }>("PUT", `/api/orgs/${orgId}/style-guide`, { text }),
   deleteTemplate: (id: string) => call("DELETE", `/api/templates/${id}`),
   uploadAttachment: async (wsId: string, file: File): Promise<Attachment> => {
     const r = await fetch(`/api/workspaces/${wsId}/attachments`, {

@@ -1,4 +1,4 @@
-"""Templates (design §4): built-in and per-user canvas pieces.
+"""Templates (design §4): built-in, per-user and org-shared (library.py, §20) canvas pieces.
 
 A template's data is a JSON Canvas document whose bounding box starts at
 (0, 0). Inserting one copies it with fresh ids, offset to where it's dropped.
@@ -14,7 +14,7 @@ import secrets
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from . import canvas_format
+from . import canvas_format, library
 from .models import Template, User, UserPrefs, utcnow
 
 KINDS = ("stencil", "fragment", "page")
@@ -186,7 +186,8 @@ def out(t: Template | dict, with_data: bool = True) -> dict:
 
 
 def mine(s: Session, user: User) -> list[Template]:
-    return list(s.scalars(select(Template).where(Template.owner_id == user.id)
+    """The user's own templates and their orgs' shared ones."""
+    return list(s.scalars(select(Template).where(library.visible_filter(Template, user))
                           .order_by(Template.kind, Template.name)))
 
 
@@ -194,15 +195,20 @@ def get(s: Session, user: User, tid: str) -> dict | None:
     if tid in BUILTIN:
         return BUILTIN[tid]
     t = s.get(Template, tid)
-    if t is None or t.owner_id != user.id:
+    if t is None or not library.can_see(s, user, t):
         return None
     return out(t)
 
 
-def create(s: Session, user: User, name: str, kind: str, data) -> Template:
+def create(s: Session, user: User, name: str, kind: str, data, org_id: str | None = None) -> Template:
     if s.query(Template).filter(Template.owner_id == user.id).count() >= MAX_PER_USER:
         raise TemplateError(f"you can keep at most {MAX_PER_USER} templates")
-    t = Template(owner_id=user.id, name=name.strip(), kind=kind, data=normalize(data, kind))
+    try:
+        library.check_org(s, user, org_id)
+    except library.LibraryError as exc:
+        raise TemplateError(str(exc)) from None
+    t = Template(owner_id=user.id, org_id=org_id, name=name.strip(), kind=kind,
+                 data=normalize(data, kind))
     s.add(t)
     s.flush()
     return t
@@ -219,7 +225,7 @@ def default_page_id(s: Session, user: User) -> str:
 def set_default_page(s: Session, user: User, tid: str) -> None:
     t = get(s, user, tid)
     if t is None or t["kind"] != "page":
-        raise TemplateError("that is not one of your page templates")
+        raise TemplateError("that is not a page template you can use")
     p = s.get(UserPrefs, user.id)
     if p is None:
         p = UserPrefs(user_id=user.id)

@@ -2,5 +2,5 @@ apiVersion: v2
 name: nodewright
 description: Web diagram editor on JSON Canvas, signed in through authentik
 type: application
-version: 0.20.0
-appVersion: "0.20.0"
+version: 0.21.0
+appVersion: "0.21.0"

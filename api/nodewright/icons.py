@@ -23,7 +23,7 @@ from pathlib import Path
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from . import ports, svgsafe, symbols
+from . import library, ports, svgsafe, symbols
 from .models import Icon, User, utcnow
 
 BUILTIN_DIR = Path(__file__).with_name("builtin_icons")
@@ -105,7 +105,8 @@ def _source(value) -> dict | None:
 
 
 def mine(s: Session, user: User) -> list[Icon]:
-    return list(s.scalars(select(Icon).where(Icon.owner_id == user.id)
+    """The user's own icons and their orgs' shared ones (library.py)."""
+    return list(s.scalars(select(Icon).where(library.visible_filter(Icon, user))
                           .order_by(Icon.name, Icon.created_at)))
 
 
@@ -133,15 +134,19 @@ def _ports(value) -> list[dict]:
 
 
 def create(s: Session, user: User, name, svg: str, tinted: bool, port_list=None,
-           source=None) -> Icon:
+           source=None, org_id: str | None = None) -> Icon:
     count = s.scalar(select(func.count()).select_from(Icon).where(Icon.owner_id == user.id))
     if count >= MAX_PER_USER:
         raise IconError(f"you can keep at most {MAX_PER_USER} icons")
     try:
+        library.check_org(s, user, org_id)
+    except library.LibraryError as exc:
+        raise IconError(str(exc), exc.status) from None
+    try:
         clean = svgsafe.clean(svg.encode())
     except svgsafe.SvgRejected as exc:
         raise IconError(str(exc)) from None
-    icon = Icon(owner_id=user.id, name=_name(name), svg=clean, tinted=bool(tinted),
+    icon = Icon(owner_id=user.id, org_id=org_id, name=_name(name), svg=clean, tinted=bool(tinted),
                 ports=_ports(port_list), source=_source(source))
     s.add(icon)
     s.flush()
@@ -149,9 +154,12 @@ def create(s: Session, user: User, name, svg: str, tinted: bool, port_list=None,
 
 
 def get_own(s: Session, user: User, icon_id: str) -> Icon:
-    icon = s.get(Icon, icon_id)
-    if icon is None or icon.owner_id != user.id:
+    """An icon the user may edit: their own, or an org's they author or admin."""
+    icon = s.get(Icon, icon_id) if re.fullmatch(r"[0-9a-f]{32}", icon_id) else None
+    if icon is None or not library.can_see(s, user, icon):
         raise IconError("no such icon", 404)
+    if not library.can_edit(s, user, icon):
+        raise IconError("only its author or an org admin can change it", 403)
     return icon
 
 

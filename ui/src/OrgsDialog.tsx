@@ -94,6 +94,45 @@ function People({ org, me, fail, onChanged }: {
   );
 }
 
+/** The org's style guide for agents (design §20): admins write it, members read it. */
+function OrgGuide({ org, fail }: { org: Org; fail: (e: unknown) => void }) {
+  const [text, setText] = useState<string | null>(null);
+  const [saved, setSaved] = useState("");
+  const [canEdit, setCanEdit] = useState(false);
+  useEffect(() => {
+    api.orgStyleGuide(org.id).then((g) => {
+      setText(g.text);
+      setSaved(g.text);
+      setCanEdit(g.can_edit);
+    }, fail);
+  }, [org.id]);
+  if (text === null) return null;
+  const save = async () => {
+    const g = await api.saveOrgStyleGuide(org.id, text).catch(fail);
+    if (g) {
+      setText(g.text);
+      setSaved(g.text);
+    }
+  };
+  return (
+    <>
+      <h3>Style guide for agents</h3>
+      <p className="muted">
+        Agents drawing in {org.name}'s workspaces follow this first, then each person's own guide.
+        {canEdit ? " Leave it empty for none." : " Only admins can change it."}
+      </p>
+      {canEdit ? (
+        <>
+          <textarea className="styleguide" value={text} maxLength={20000} aria-label={`${org.name} style guide`}
+            placeholder="e.g. Left to right. Green for our services, red for anything external."
+            onChange={(e) => setText(e.target.value)} />
+          <p><button onClick={() => void save()} disabled={text === saved}>Save style guide</button></p>
+        </>
+      ) : <pre className="styleguide-view">{text || "No org style guide yet."}</pre>}
+    </>
+  );
+}
+
 export function OrgsDialog({ me, onClose, onChanged }: {
   me: string;
   onClose: () => void;
@@ -139,7 +178,7 @@ export function OrgsDialog({ me, onClose, onChanged }: {
     await api.renameOrg(o.id, name).then(changed, fail);
   };
   const remove = async (o: Org) => {
-    if (!confirm(`Delete ${o.name}? Only possible once it owns no workspaces.`)) return;
+    if (!confirm(`Delete ${o.name}? Only possible once it owns no workspaces. Its shared templates, icons and style guide are deleted with it.`)) return;
     await api.deleteOrg(o.id).then(changed, fail);
   };
 
@@ -184,6 +223,7 @@ export function OrgsDialog({ me, onClose, onChanged }: {
             </h3>
             <People org={current} me={me} fail={fail} onChanged={changed} />
             {current.role === "admin" && <p className="muted">They need to have signed in to nodewright once.</p>}
+            <OrgGuide org={current} fail={fail} />
           </section>
         )}
       </div>

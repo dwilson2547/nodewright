@@ -231,8 +231,7 @@ of editor polish.
    ✅ schema nodes (0.14.0) → ✅ versions (0.15.0, §14; ✅ user: per tab, not per schema or per
    workspace) → ✅ schematic symbols, junctions and net labels (0.16.0, §15) → ✅ schematic wiring
    (0.17.0, §16) → ✅ colour by net (0.18.0, §17) → ✅ manual edge waypoints (0.19.0, §18) →
-   ✅ organisations and roles (0.20.0, §19). Next (✅ user, 2026-10-12): org-shared libraries
-   (templates, icons, style guide).
+   ✅ organisations and roles (0.20.0, §19) → ✅ org-shared libraries (0.21.0, §20).
 6. **Stretch:** marketplace (§11.5), custom roles.
 
 Full MCP OAuth (§6.2) was pulled forward and shipped as 0.3.0 (✅ user asked for browser sign-in).
@@ -266,7 +265,8 @@ updates, style guides, shapes and line styles, templates, tab links, attachments
 Alembic migrations, CI and the unused-attachment sweep. 0.8.0 added workspace members, 0.9.0 workspace zip
 export, 0.10.0 edge corner radius, 0.11.0 node ports, 0.12.0 icons, 0.13.0 icon creator, 0.14.0
 schema nodes, 0.15.0 versions, 0.16.0 schematic symbols, 0.17.0 schematic wiring, 0.18.0 colour
-by net, 0.19.0 manual edge waypoints, 0.20.0 organisations. Not yet: org-shared libraries, zip import. Live updates are in-process, so the chart must stay at
+by net, 0.19.0 manual edge waypoints, 0.20.0 organisations, 0.21.0 org-shared libraries. Not yet: zip
+import. Live updates are in-process, so the chart must stay at
 one replica until `events.py` moves to Postgres LISTEN/NOTIFY.
 
 ## 11. Future: collaboration and community 📐
@@ -645,7 +645,9 @@ release; org-shared libraries (templates, icons, style guide) are the follow-up.
   - `org_access` for any member of that org;
   - the user's own `workspace_members` row. Guests from outside the org are added this way.
 
-  The creator of an org workspace has no special rights: a plain member can't rename it.
+  The creator of an org workspace (or whoever moved it in, `owner_id`) may also rename it while
+  they can open it (`access.RENAME`, ✅ user 2026-10-12); nothing else. Deleting, moving and org
+  access stay with admins.
 - **Running an org:**
   - Admins add existing users by exact username (no invites), change roles and remove people;
     anyone can leave.
@@ -679,5 +681,32 @@ release; org-shared libraries (templates, icons, style guide) are the follow-up.
     workspaces not filed in a folder. Filing never changes a workspace's org.
   - The Share dialog has an "Everyone in <org>" access row and a Move section.
 
-Not done: org-shared libraries; custom roles (`access.ROLES` stays the lookup table a per-org
+Not done: custom roles (`access.ROLES` stays the lookup table a per-org
 roles table would replace); a commenter role.
+
+## 20. Org-shared libraries ✅ (0.21.0, `library.py`, `styleguide.py`, `Palette.tsx` ShareControl)
+
+- **Schema** (migration `0008`): `templates.org_id` and `icons.org_id` (null = only the author's;
+  `ON DELETE CASCADE`, so deleting an org deletes what was shared with it), and
+  `org_style_guides(org_id PK, text)`.
+- **Templates and icons** (`library.py`):
+  - Every org member sees and uses an item shared with their org.
+  - Its author (while in the org) and the org's admins rename, edit or delete it.
+  - Only its author shares it into an org they're in, or takes it back. An author who leaves the
+    org leaves it there.
+  - Items can be created straight into an org (`org_id` on `POST /api/templates` and
+    `/api/icons`, and on the `save_template` tool).
+  - Listed items carry `org`, `can_edit` and `mine`.
+  - The per-user limits count what a user authored.
+  - Icon SVGs were already served by id to anyone, so canvases using a shared icon render for
+    everyone.
+- **Style guides:** admins write the org's guide in the Organisations dialog; members read it there.
+  `get_style_guide` returns `org_guides` alongside the user's own guide, limited to the canvas's
+  org when given `canvas_id`. Agents are told to follow the org's guide first and fill in from
+  the user's own.
+- **UI:**
+  - Shared templates and icons show dashed, with the org's name (in the tooltip for icons).
+  - ⇄ on one of your own picks the org to share it with, or "Only me".
+  - Edit and delete buttons show only where `can_edit` is true.
+
+Not done: per-org template or icon limits; a default page set for a whole org.

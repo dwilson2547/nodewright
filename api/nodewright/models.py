@@ -217,6 +217,16 @@ class StyleGuide(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class OrgStyleGuide(Base):
+    """An org's style guide for agents (design §20): admins write it; agents
+    working in the org's workspaces get it with the user's own."""
+    __tablename__ = "org_style_guides"
+
+    org_id: Mapped[str] = mapped_column(ForeignKey("orgs.id", ondelete="CASCADE"), primary_key=True)
+    text: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class OAuthClient(Base):
     """An MCP client that registered itself (RFC 7591). `info` is the SDK's
     OAuthClientInformationFull as JSON, secret included: the SDK compares it
@@ -284,6 +294,9 @@ class Template(Base):
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     owner_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    """The author. With org_id set it's shared with that org (library.py, design §20)."""
+    org_id: Mapped[str | None] = mapped_column(
+        ForeignKey("orgs.id", ondelete="CASCADE"), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(200))
     kind: Mapped[str] = mapped_column(String(16))
     data: Mapped[dict] = mapped_column(Json)
@@ -378,6 +391,9 @@ class Icon(Base):
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     owner_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    """The author. With org_id set it's shared with that org (library.py, design §20)."""
+    org_id: Mapped[str | None] = mapped_column(
+        ForeignKey("orgs.id", ondelete="CASCADE"), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(100))
     svg: Mapped[str] = mapped_column(Text)
     tinted: Mapped[bool] = mapped_column(Boolean, default=True)
