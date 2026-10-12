@@ -1,7 +1,14 @@
-// Sharing (design §9, §11.1): workspace members, then read-only links for the open tab.
-// Owners manage both; members see who else has access and can leave.
+// Sharing (design §9, §11.1, §19): the org's access and workspace members, moving the
+// workspace into or out of an org, then read-only links for the open tab.
+// Owners (and an org's admins) manage all of it; members see who else has access and can leave.
 import { useEffect, useState } from "react";
-import { api, type Member, type Members, type Role, type ShareLink, type Workspace } from "./api";
+import { api, type Member, type Members, type Org, type OrgAccess, type Role, type ShareLink, type Workspace } from "./api";
+
+const ORG_ACCESS_HELP: Record<OrgAccess, string> = {
+  none: "Only org admins and people added below",
+  viewer: "Everyone in the org can open it",
+  editor: "Everyone in the org can edit it",
+};
 
 const ROLE_HELP: Record<Role, string> = {
   owner: "Owns the workspace",
@@ -54,12 +61,33 @@ function People({ ws, me, fail, onLeft }: {
     }, fail);
   };
 
+  const setAccess = async (a: OrgAccess) => {
+    const w = await api.setOrgAccess(ws.id, a).catch(fail);
+    if (w) setData((d) => d && d.org && { ...d, org: { ...d.org, access: a } });
+  };
+
   if (!data) return null;
   return (
     <section>
       <h3>People</h3>
-      <p className="muted">Members see “{ws.name}” in their own sidebar, with every tab in it.</p>
+      <p className="muted">
+        {data.org ? `${data.org.name} owns this workspace; its admins can do anything with it. ` : ""}
+        People with access see “{ws.name}” in their own sidebar, with every tab in it.
+      </p>
       <ul className="share-list member-list">
+        {data.org && (
+          <li>
+            <span className="grow">Everyone in {data.org.name}</span>
+            {data.can_manage ? (
+              <select value={data.org.access} aria-label="Org access"
+                onChange={(e) => void setAccess(e.target.value as OrgAccess)}>
+                {data.org_access_options.map((a) => (
+                  <option key={a} value={a} title={ORG_ACCESS_HELP[a]}>{a === "none" ? "no access" : a}</option>
+                ))}
+              </select>
+            ) : <span className="muted" title={ORG_ACCESS_HELP[data.org.access]}>{data.org.access}</span>}
+          </li>
+        )}
         {data.members.map((m) => (
           <li key={m.user_id}>
             <span className="grow">{m.username}{m.username === me && <span className="muted"> (you)</span>}</span>
@@ -88,6 +116,52 @@ function People({ ws, me, fail, onLeft }: {
       {data.can_manage && (
         <p className="muted">They need to have signed in to nodewright once.</p>
       )}
+    </section>
+  );
+}
+
+/** Move the workspace into one of your orgs, or (from an org) to a member's personal space. */
+function Move({ ws, me, fail, onMoved }: {
+  ws: Workspace;
+  me: string;
+  fail: (e: unknown) => void;
+  onMoved: (stillVisible: boolean) => void;
+}) {
+  const [orgs, setOrgs] = useState<Org[] | null>(null);
+  const [target, setTarget] = useState("");
+  const [owner, setOwner] = useState(me);
+
+  useEffect(() => {
+    api.orgs().then((r) => setOrgs(r.orgs), fail);
+  }, []);
+
+  const options = (orgs ?? []).filter((o) => o.id !== ws.org?.id);
+  if (!orgs || (!ws.org && options.length === 0)) return null;
+  const move = async () => {
+    const to = target === "personal" ? null : target;
+    const where = to ? options.find((o) => o.id === to)?.name : `${owner.trim()}'s personal workspaces`;
+    if (!confirm(`Move “${ws.name}” to ${where}? Who can open it changes with the move.`)) return;
+    const r = await api.moveWorkspace(ws.id, to, to ? undefined : owner.trim()).catch(fail);
+    if (r) onMoved(r.can_see);
+  };
+  return (
+    <section>
+      <h3>Move</h3>
+      <p className="muted">
+        {ws.org ? `Owned by ${ws.org.name}.` : "Your personal workspace."} People added by name keep their access.
+      </p>
+      <p className="member-add">
+        <select value={target} onChange={(e) => setTarget(e.target.value)} aria-label="Move to">
+          <option value="" disabled>Move to…</option>
+          {options.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+          {ws.org && <option value="personal">A member's personal workspaces</option>}
+        </select>
+        {target === "personal" && (
+          <input value={owner} onChange={(e) => setOwner(e.target.value)} aria-label="New owner's username"
+            placeholder="Username" autoComplete="off" />
+        )}
+        <button disabled={!target || (target === "personal" && !owner.trim())} onClick={() => void move()}>Move</button>
+      </p>
     </section>
   );
 }
@@ -154,13 +228,15 @@ function Links({ canvasId, canvasName, fail }: {
   );
 }
 
-export function ShareDialog({ workspace, canvasId, canvasName, me, onClose, onLeft }: {
+export function ShareDialog({ workspace, canvasId, canvasName, me, onClose, onLeft, onMoved }: {
   workspace: Workspace;
   canvasId: string | null;
   canvasName: string;
   me: string;
   onClose: () => void;
   onLeft: () => void;
+  /** It moved to or from an org; stillVisible is false if you can no longer open it. */
+  onMoved: (stillVisible: boolean) => void;
 }) {
   const [error, setError] = useState<string | null>(null);
   const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
@@ -180,7 +256,8 @@ export function ShareDialog({ workspace, canvasId, canvasName, me, onClose, onLe
           <button onClick={onClose} aria-label="Close">×</button>
         </header>
         {error && <p className="error">{error}</p>}
-        <People ws={workspace} me={me} fail={fail} onLeft={onLeft} />
+        <People key={"people-" + (workspace.org?.id ?? "personal")} ws={workspace} me={me} fail={fail} onLeft={onLeft} />
+        {workspace.role === "owner" && <Move key={"move-" + (workspace.org?.id ?? "personal")} ws={workspace} me={me} fail={fail} onMoved={onMoved} />}
         {workspace.role === "owner" && canvasId && <Links canvasId={canvasId} canvasName={canvasName} fail={fail} />}
       </div>
     </div>

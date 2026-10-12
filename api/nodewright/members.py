@@ -30,12 +30,14 @@ def out(user: User, role: str) -> dict:
 
 
 def listing(s: Session, ws: Workspace) -> list[dict]:
-    """The owner first, then members by username."""
+    """The owner first (a personal workspace's; an org's workspace has none,
+    its org admins act as owners), then members by username."""
     rows = s.execute(select(User, WorkspaceMember.role)
                      .join(WorkspaceMember, WorkspaceMember.user_id == User.id)
                      .where(WorkspaceMember.workspace_id == ws.id)
                      .order_by(User.username)).all()
-    return [out(ws.owner, "owner")] + [out(u, r) for u, r in rows]
+    head = [out(ws.owner, "owner")] if ws.org_id is None else []
+    return head + [out(u, r) for u, r in rows]
 
 
 def _role(role: str) -> str:
@@ -57,7 +59,7 @@ def add(s: Session, ws: Workspace, username: str, role: str) -> dict:
     user = s.scalar(select(User).where(User.username == username.strip().lower()))
     if user is None:
         raise MemberError("no user with that username; they need to sign in to nodewright once", 404)
-    if user.id == ws.owner_id:
+    if ws.org_id is None and user.id == ws.owner_id:
         raise MemberError("that's the workspace owner")
     existing = s.scalar(select(WorkspaceMember).where(WorkspaceMember.workspace_id == ws.id,
                                                       WorkspaceMember.user_id == user.id))

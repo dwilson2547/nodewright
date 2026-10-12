@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.20.0 - 2026-10-12
+
+### Added
+- **Organisations.** Anyone can create one with the new **Orgs** button.
+  - Admins add people by username, change their role (admin or member) and remove them; anyone
+    can leave. An org always keeps at least one admin.
+  - An org owns workspaces. Its admins can do anything with them; its members get each
+    workspace's org access (editor by default, or viewer, or no access), set in Share. You can
+    still add people, including people outside the org, to a single workspace.
+  - Create a workspace in an org with the "+" on its sidebar heading, or move one in (or out to
+    a member's personal space) from Share → Move.
+- Optional authentik group mapping (`orgGroups` in the Helm values): people in a mapped group join
+  that org with that role when they sign in, and leave it when they leave the group.
+- Agents see orgs in `list_workspaces` and can create a workspace in an org.
+
 ## 0.19.0 - 2026-10-12
 
 ### Added

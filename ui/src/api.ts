@@ -45,9 +45,20 @@ export type Attachment = {
   id: string; name: string; content_type: string; size: number; image: boolean; file: string; url: string;
 };
 export type Role = "owner" | "editor" | "viewer";
+export type OrgAccess = "none" | "viewer" | "editor";
+/** The org that owns a workspace (design §19), and the role its members get there. */
+export type WorkspaceOrg = { id: string; name: string; access: OrgAccess };
 export type Workspace = {
-  id: string; name: string; updated_at: string; role: Role; owner: string; folder_id?: string | null;
+  id: string; name: string; updated_at: string; role: Role;
+  /** The owner's username, or the org's name for an org's workspace. */
+  owner: string; folder_id?: string | null; org: WorkspaceOrg | null;
 };
+export type OrgRole = "admin" | "member";
+/** managed: named in the server's authentik group mapping, so it can't be renamed here. */
+export type Org = { id: string; name: string; role: OrgRole; managed: boolean };
+/** source "authentik": synced from an authentik group at sign-in, not editable here. */
+export type OrgMember = { user_id: string; username: string; role: OrgRole; source: "manual" | "authentik" };
+export type OrgMembers = { members: OrgMember[]; roles: OrgRole[]; can_manage: boolean };
 export type Icon = {
   id: string; name: string; file: string; url: string; tinted: boolean; ports: Port[]; builtin: boolean;
   editable: boolean;
@@ -59,7 +70,10 @@ export type SchemaParse = {
   fields: { path: string; name: string; type: string; line: number }[];
 };
 export type Member = { user_id: string; username: string; role: Role };
-export type Members = { members: Member[]; assignable: Role[]; can_manage: boolean };
+export type Members = {
+  members: Member[]; assignable: Role[]; can_manage: boolean;
+  org: WorkspaceOrg | null; org_access_options: OrgAccess[];
+};
 
 export type Revision = {
   revision: number;
@@ -108,7 +122,23 @@ export const api = {
   logout: () => call("POST", "/api/auth/logout"),
   devLogin: (name: string) => call<Me>("POST", "/api/auth/dev-login", { name }),
   workspaces: () => call<Workspace[]>("GET", "/api/workspaces"),
-  createWorkspace: (name: string) => call<Workspace>("POST", "/api/workspaces", { name }),
+  createWorkspace: (name: string, org_id: string | null = null) =>
+    call<Workspace>("POST", "/api/workspaces", { name, org_id }),
+  setOrgAccess: (id: string, org_access: OrgAccess) =>
+    call<Workspace>("PATCH", `/api/workspaces/${id}`, { org_access }),
+  /** Into an org (org_id), or out to `owner`'s personal space (org_id null). */
+  moveWorkspace: (id: string, org_id: string | null, owner?: string) =>
+    call<Workspace & { can_see: boolean }>("POST", `/api/workspaces/${id}/move`, { org_id, owner }),
+  orgs: () => call<{ orgs: Org[] }>("GET", "/api/orgs"),
+  createOrg: (name: string) => call<Org>("POST", "/api/orgs", { name }),
+  renameOrg: (id: string, name: string) => call<Org>("PATCH", `/api/orgs/${id}`, { name }),
+  deleteOrg: (id: string) => call("DELETE", `/api/orgs/${id}`),
+  orgMembers: (id: string) => call<OrgMembers>("GET", `/api/orgs/${id}/members`),
+  addOrgMember: (id: string, username: string, role: OrgRole) =>
+    call<OrgMember>("POST", `/api/orgs/${id}/members`, { username, role }),
+  setOrgRole: (id: string, userId: string, role: OrgRole) =>
+    call<OrgMember>("PATCH", `/api/orgs/${id}/members/${userId}`, { role }),
+  removeOrgMember: (id: string, userId: string) => call("DELETE", `/api/orgs/${id}/members/${userId}`),
   renameWorkspace: (id: string, name: string) => call<Workspace>("PATCH", `/api/workspaces/${id}`, { name }),
   deleteWorkspace: (id: string) => call("DELETE", `/api/workspaces/${id}`),
   fileWorkspace: (id: string, folder_id: string | null) =>

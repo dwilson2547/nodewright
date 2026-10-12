@@ -1,9 +1,10 @@
-"""Every permission decision (design §11.1).
+"""Every permission decision (design §11.1, §19).
 
-Routes and MCP tools call authorize(); none of them compare owner ids
-themselves. Today only owners exist in practice, but members and roles are
-already read here, so sharing and organisations later change this module,
-not every endpoint.
+Routes and MCP tools call these; none of them compare owner ids themselves.
+A user's role on a workspace is the highest of:
+- owner: the owner of a personal workspace, or an admin of the org that owns it;
+- the workspace's org_access (viewer/editor) for any member of its org;
+- their own row in workspace_members.
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ from fastapi import HTTPException
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from .models import Canvas, User, Workspace, WorkspaceMember
+from .models import Canvas, OrgMember, User, Workspace, WorkspaceMember
 
 READ = "workspace.read"
 MANAGE = "workspace.manage"          # rename, delete
@@ -30,6 +31,11 @@ ROLES: dict[str, frozenset[str]] = {
 }
 
 
+RANK = {"viewer": 1, "editor": 2, "owner": 3}
+ORG_ROLES = ("admin", "member")
+ORG_ACCESS = ("none", "viewer", "editor")
+
+
 class Denied(Exception):
     """Not found or not allowed; the two are deliberately indistinguishable
     to the caller unless it can at least read the workspace."""
@@ -39,11 +45,26 @@ class Denied(Exception):
         self.status = status
 
 
+def org_role(s: Session, user: User, org_id: str) -> str | None:
+    """admin, member, or None if the user isn't in the org."""
+    return s.scalar(select(OrgMember.role).where(OrgMember.org_id == org_id,
+                                                 OrgMember.user_id == user.id))
+
+
 def role_on(s: Session, user: User, ws: Workspace) -> str | None:
-    if ws.owner_id == user.id:
-        return "owner"
-    return s.scalar(select(WorkspaceMember.role).where(
+    if ws.org_id is None:
+        if ws.owner_id == user.id:
+            return "owner"
+        via_org = None
+    else:
+        in_org = org_role(s, user, ws.org_id)
+        if in_org == "admin":
+            return "owner"
+        via_org = ws.org_access if in_org and ws.org_access in RANK else None
+    own = s.scalar(select(WorkspaceMember.role).where(
         WorkspaceMember.workspace_id == ws.id, WorkspaceMember.user_id == user.id))
+    roles = [r for r in (via_org, own) if r]
+    return max(roles, key=RANK.get) if roles else None
 
 
 def can(s: Session, user: User, ws: Workspace, action: str) -> bool:
@@ -74,9 +95,14 @@ def canvas(s: Session, user: User, canvas_id: str, action: str = READ) -> Canvas
 
 def visible_workspaces(s: Session, user: User) -> list[Workspace]:
     member_of = select(WorkspaceMember.workspace_id).where(WorkspaceMember.user_id == user.id)
-    return list(s.scalars(select(Workspace)
-                          .where(or_(Workspace.owner_id == user.id, Workspace.id.in_(member_of)))
-                          .order_by(Workspace.created_at)))
+    admin_of = select(OrgMember.org_id).where(OrgMember.user_id == user.id, OrgMember.role == "admin")
+    in_org = select(OrgMember.org_id).where(OrgMember.user_id == user.id)
+    return list(s.scalars(select(Workspace).where(or_(
+        (Workspace.owner_id == user.id) & Workspace.org_id.is_(None),
+        Workspace.id.in_(member_of),
+        Workspace.org_id.in_(admin_of),
+        Workspace.org_id.in_(in_org) & (Workspace.org_access != "none"),
+    )).order_by(Workspace.created_at)))
 
 
 def http(exc: Denied) -> HTTPException:

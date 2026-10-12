@@ -24,11 +24,11 @@ from pydantic import AnyHttpUrl, BaseModel, ConfigDict
 from starlette.routing import Route
 
 from . import (__version__, access, attachments, auth, bundle, canvas_format, events, folders,
-               icons, leases, members, schemas, versions, mcp_server, oauth, oidc, render, shares, storage, styleguide,
+               icons, leases, members, orgs, schemas, versions, mcp_server, oauth, oidc, render, shares, storage, styleguide,
                svgsafe, templates, tokens)
 from .config import Settings
 from .db import Database
-from .models import (AccessToken, Attachment, Canvas, CanvasRevision, OAuthGrant, ShareLink, StyleGuide,
+from .models import (AccessToken, Attachment, Canvas, CanvasRevision, OAuthGrant, OrgMember, ShareLink, StyleGuide,
                      Template, User, Workspace, utcnow)
 
 log = logging.getLogger("nodewright")
@@ -94,6 +94,29 @@ class RoleIn(BaseModel):
     role: str = Field(max_length=32)
 
 
+class DevLoginIn(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    groups: list[str] | None = None
+    """Pretend authentik sent these groups (ORG_GROUPS sync), for local testing."""
+
+
+class WorkspaceIn(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    org_id: str | None = Field(default=None, max_length=32)
+
+
+class WorkspacePatch(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    org_access: str | None = Field(default=None, max_length=16)
+
+
+class MoveIn(BaseModel):
+    org_id: str | None = Field(default=None, max_length=32)
+    """Move into this org, or null to make it personal again..."""
+    owner: str | None = Field(default=None, max_length=64)
+    """...owned by this org member (default: you)."""
+
+
 class ShareIn(BaseModel):
     all_tabs: bool = False
 
@@ -128,8 +151,10 @@ def _iso(dt: datetime) -> str:
 
 
 def _ws_out(ws: Workspace, role: str = "owner") -> dict:
+    org = ws.org
     return {"id": ws.id, "name": ws.name, "updated_at": _iso(ws.updated_at), "role": role,
-            "owner": ws.owner.username}
+            "owner": org.name if org else ws.owner.username,
+            "org": {"id": org.id, "name": org.name, "access": ws.org_access} if org else None}
 
 
 def _canvas_meta(c: Canvas) -> dict:
@@ -314,7 +339,7 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
         try:
             claims = oidc.finish(provider, settings, request.cookies.get(oidc.FLOW_COOKIE, ""),
                                  code, state)
-            user = oidc.resolve_user(s, claims)
+            user = oidc.resolve_user(s, claims, settings)
             auth.start_session(s, user, settings, res)
         except oidc.SignInRefused:
             return RedirectResponse("/?signin_error=refused", 302)
@@ -325,12 +350,14 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
 
     if settings.dev_login_enabled:
         @app.post("/api/auth/dev-login")
-        def dev_login(body: NameIn, request: Request, response: Response,
+        def dev_login(body: DevLoginIn, request: Request, response: Response,
                       s: Session = Depends(session)):
             if request.headers.get(auth.CSRF_HEADER) != "1":
                 raise HTTPException(403, "missing X-Nodewright header")
             name = auth.USERNAME_RE.sub("", body.name.lower())[:60] or "dev"
             user = s.scalar(select(User).where(User.username == name)) or auth.create_user(s, name)
+            if body.groups is not None:
+                orgs.sync_groups(s, user, body.groups, settings.org_groups)
             auth.start_session(s, user, settings, response)
             return {"id": user.id, "username": user.username}
 
@@ -390,21 +417,120 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
         return Response(status_code=204)
 
     @app.post("/api/workspaces", status_code=201)
-    def create_workspace(body: NameIn, user: User = Depends(user_dep),
+    def create_workspace(body: WorkspaceIn, user: User = Depends(user_dep),
                          s: Session = Depends(session)):
-        ws = Workspace(owner_id=user.id, name=body.name.strip())
+        if body.org_id is not None and not access.org_role(s, user, body.org_id):
+            raise HTTPException(404, "org not found")
+        ws = Workspace(owner_id=user.id, name=body.name.strip(), org_id=body.org_id)
         s.add(ws)
         s.flush()
         s.add(Canvas(workspace_id=ws.id, name="Untitled", position=0, revision=1,
                      data=templates.page_data(s, user, None)))
-        return _ws_out(ws)
+        s.refresh(ws)
+        return _ws_out(ws, access.role_on(s, user, ws))
 
     @app.patch("/api/workspaces/{ws_id}")
-    def rename_workspace(ws_id: str, body: NameIn, user: User = Depends(user_dep),
-                         s: Session = Depends(session)):
+    def patch_workspace(ws_id: str, body: WorkspacePatch, user: User = Depends(user_dep),
+                        s: Session = Depends(session)):
         ws = workspace_for(s, user, ws_id, access.MANAGE)
-        ws.name, ws.updated_at = body.name.strip(), utcnow()
-        return _ws_out(ws)
+        if body.name is not None:
+            ws.name, ws.updated_at = body.name.strip(), utcnow()
+        if body.org_access is not None:
+            try:
+                orgs.set_access(ws, body.org_access)
+            except orgs.OrgError as exc:
+                raise HTTPException(exc.status, str(exc)) from None
+            s.flush()
+            for (uid,) in s.execute(select(OrgMember.user_id).where(OrgMember.org_id == ws.org_id)).all():
+                orgs.lost_access(s, s.get(User, uid), ws.org_id)
+        return _ws_out(ws, access.role_on(s, user, ws))
+
+    @app.post("/api/workspaces/{ws_id}/move")
+    def move_workspace(ws_id: str, body: MoveIn, user: User = Depends(user_dep),
+                       s: Session = Depends(session)):
+        ws = workspace_for(s, user, ws_id, access.MANAGE)
+        try:
+            orgs.move(s, user, ws, body.org_id, body.owner)
+        except orgs.OrgError as exc:
+            raise HTTPException(exc.status, str(exc)) from None
+        s.refresh(ws)
+        role = access.role_on(s, user, ws)
+        return {**_ws_out(ws, role or "none"), "can_see": role is not None}
+
+    # --- organisations (orgs.py) ------------------------------------------------
+
+    managed_orgs = {name for name, _ in settings.org_groups.values()}
+
+    def org_error(exc: orgs.OrgError) -> HTTPException:
+        return HTTPException(exc.status, str(exc))
+
+    @app.get("/api/orgs")
+    def list_orgs(user: User = Depends(user_dep), s: Session = Depends(session)):
+        return {"orgs": [orgs.out(o, r, managed_orgs) for o, r in orgs.mine(s, user)]}
+
+    @app.post("/api/orgs", status_code=201)
+    def create_org(body: NameIn, user: User = Depends(user_dep), s: Session = Depends(session)):
+        try:
+            return orgs.out(orgs.create(s, user, body.name), "admin", managed_orgs)
+        except orgs.OrgError as exc:
+            raise org_error(exc) from None
+
+    @app.patch("/api/orgs/{org_id}")
+    def rename_org(org_id: str, body: NameIn, user: User = Depends(user_dep),
+                   s: Session = Depends(session)):
+        try:
+            org, role = orgs.get(s, user, org_id, admin=True)
+            orgs.rename(s, org, body.name, managed_orgs)
+        except orgs.OrgError as exc:
+            raise org_error(exc) from None
+        return orgs.out(org, role, managed_orgs)
+
+    @app.delete("/api/orgs/{org_id}", status_code=204)
+    def delete_org(org_id: str, user: User = Depends(user_dep), s: Session = Depends(session)):
+        try:
+            org, _ = orgs.get(s, user, org_id, admin=True)
+            orgs.remove_org(s, org)
+        except orgs.OrgError as exc:
+            raise org_error(exc) from None
+        return Response(status_code=204)
+
+    @app.get("/api/orgs/{org_id}/members")
+    def list_org_members(org_id: str, user: User = Depends(user_dep), s: Session = Depends(session)):
+        try:
+            org, role = orgs.get(s, user, org_id)
+        except orgs.OrgError as exc:
+            raise org_error(exc) from None
+        return {"members": orgs.listing(s, org), "roles": list(access.ORG_ROLES),
+                "can_manage": role == "admin"}
+
+    @app.post("/api/orgs/{org_id}/members", status_code=201)
+    def add_org_member(org_id: str, body: MemberIn, user: User = Depends(user_dep),
+                       s: Session = Depends(session)):
+        try:
+            org, _ = orgs.get(s, user, org_id, admin=True)
+            return orgs.add(s, org, body.username, body.role)
+        except orgs.OrgError as exc:
+            raise org_error(exc) from None
+
+    @app.patch("/api/orgs/{org_id}/members/{user_id}")
+    def set_org_role(org_id: str, user_id: str, body: RoleIn, user: User = Depends(user_dep),
+                     s: Session = Depends(session)):
+        try:
+            org, _ = orgs.get(s, user, org_id, admin=True)
+            return orgs.set_role(s, org, user_id, body.role)
+        except orgs.OrgError as exc:
+            raise org_error(exc) from None
+
+    @app.delete("/api/orgs/{org_id}/members/{user_id}", status_code=204)
+    def remove_org_member(org_id: str, user_id: str, user: User = Depends(user_dep),
+                          s: Session = Depends(session)):
+        # Admins remove anyone; everyone else only themselves (leave).
+        try:
+            org, _ = orgs.get(s, user, org_id, admin=user_id != user.id)
+            orgs.remove(s, org, user_id)
+        except orgs.OrgError as exc:
+            raise org_error(exc) from None
+        return Response(status_code=204)
 
     @app.delete("/api/workspaces/{ws_id}", status_code=204)
     def delete_workspace(ws_id: str, tasks: BackgroundTasks, user: User = Depends(user_dep),
@@ -428,7 +554,9 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
     def list_members(ws_id: str, user: User = Depends(user_dep), s: Session = Depends(session)):
         ws = workspace_for(s, user, ws_id)
         return {"members": members.listing(s, ws), "assignable": list(members.ASSIGNABLE),
-                "can_manage": access.can(s, user, ws, access.MEMBERS_MANAGE)}
+                "can_manage": access.can(s, user, ws, access.MEMBERS_MANAGE),
+                "org": {"id": ws.org.id, "name": ws.org.name, "access": ws.org_access} if ws.org else None,
+                "org_access_options": list(access.ORG_ACCESS)}
 
     @app.post("/api/workspaces/{ws_id}/members", status_code=201)
     def add_member(ws_id: str, body: MemberIn, user: User = Depends(user_dep),

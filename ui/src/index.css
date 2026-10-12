@@ -303,6 +303,14 @@ input[type="color"] { width: 24px; height: 22px; padding: 0; border: none; backg
 .member-add { display: flex; gap: 6px; margin-top: 8px; }
 .member-add input { flex: 1; min-width: 0; }
 .sb-shared { margin-left: auto; padding-left: 6px; color: var(--muted); font-size: 11px; }
+/* Organisations (design §19): a heading per org under the folders, and a tag on org workspaces filed in folders. */
+.sb-orgsec { margin-top: 6px; }
+.sb-orghead { font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); padding-left: 4px; }
+.sb-org { margin-left: auto; padding-left: 6px; color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40%; }
+.org-title button { font: inherit; font-size: 12px; font-weight: 400; padding: 2px 8px; margin-left: 6px; vertical-align: middle; }
+.org-title button:disabled { opacity: .45; cursor: default; }
+.org-pick { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.org-pick button[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
 
 /* history panel and version preview (HistoryPanel.tsx, Editor.tsx) */
 header button.on { border-color: var(--accent); color: var(--accent); }

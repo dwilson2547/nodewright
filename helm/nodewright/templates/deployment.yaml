@@ -75,6 +75,10 @@ spec:
             - name: RENDER_BASE_URL
               value: "http://{{ .Release.Name }}.{{ .Release.Namespace }}.svc"
             {{- end }}
+            {{- with .Values.orgGroups }}
+            - name: ORG_GROUPS
+              value: {{ toJson . | quote }}
+            {{- end }}
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

@@ -2,7 +2,7 @@ image:
   repository: dwilson2547/nodewright
   # A release from CHANGELOG.md. Bumping this is how a release reaches the
   # cluster; :latest is pushed too, but the chart doesn't follow it.
-  tag: "0.19.0"
+  tag: "0.20.0"
   pullPolicy: IfNotPresent
 
 # Public (Traefik pubsecure, letsencrypt-prod, external-dns). Everything but
@@ -42,6 +42,16 @@ attachments:
 # 5 concurrent sessions. Leave empty to disable the tool.
 render:
   browserlessUrl: http://browserless.scrape-stack.svc:3000
+
+# authentik group -> organisation (design §19). At each sign-in, members of a
+# listed group join that org (created when first needed) with that role, and
+# leave it when they leave the group. Only these orgs, and only memberships
+# that came from here, are touched. Needs the groups claim (profile scope).
+# Example:
+#   orgGroups:
+#     acme-staff: {org: Acme, role: member}
+#     acme-admins: {org: Acme, role: admin}
+orgGroups: {}
 
 # One replica: the schema is created at startup (create_all), and two pods
 # racing that on first boot is the one thing that could go wrong. All state is

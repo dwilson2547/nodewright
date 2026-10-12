@@ -2,8 +2,29 @@
 
 from __future__ import annotations
 
+import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+
+def parse_org_groups(raw: str | None) -> dict[str, tuple[str, str]]:
+    """ORG_GROUPS: JSON {"<authentik group>": {"org": "<org name>", "role": "admin|member"}}.
+    Raises ValueError on a malformed value, so a typo stops start-up instead of
+    silently mapping nobody."""
+    if not raw or not raw.strip():
+        return {}
+    data = json.loads(raw)
+    if not isinstance(data, dict):
+        raise ValueError("ORG_GROUPS must be a JSON object")
+    out = {}
+    for group, v in data.items():
+        if not isinstance(v, dict) or not isinstance(v.get("org"), str) or not v["org"].strip():
+            raise ValueError(f"ORG_GROUPS[{group!r}] needs an org name")
+        role = v.get("role", "member")
+        if role not in ("admin", "member"):
+            raise ValueError(f"ORG_GROUPS[{group!r}].role must be admin or member")
+        out[group] = (v["org"].strip(), role)
+    return out
 
 
 @dataclass(frozen=True)
@@ -34,6 +55,8 @@ class Settings:
     http://browserless.scrape-stack.svc:3000; render_canvas is off without it."""
     render_base_url: str | None = None
     """Where that browser reaches this app (in-cluster service URL); defaults to public_url."""
+    org_groups: dict[str, tuple[str, str]] = field(default_factory=dict)
+    """authentik group -> (org name, role), applied at each sign-in (orgs.sync_groups)."""
     dev_login: bool = False
     """Local-only sign-in without authentik, for development and UI tests.
     Refused when public_url is https, so it can't be switched on in prod."""
@@ -73,5 +96,6 @@ class Settings:
             attachment_keep_days=int(env.get("ATTACHMENT_KEEP_DAYS") or cls.attachment_keep_days),
             browserless_url=env.get("BROWSERLESS_URL") or None,
             render_base_url=env.get("RENDER_BASE_URL") or None,
+            org_groups=parse_org_groups(env.get("ORG_GROUPS")),
             dev_login=(env.get("DEV_LOGIN") or "") == "1",
         )

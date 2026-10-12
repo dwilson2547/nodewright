@@ -21,7 +21,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.streamable_http_manager import StreamableHTTPASGIApp
 from mcp.server.transport_security import TransportSecuritySettings
 
-from . import (__version__, access, attachments, canvas_format, folders, icons, leases, ops, render, storage,
+from . import (__version__, access, attachments, canvas_format, folders, icons, leases, ops, orgs, render, storage,
                styleguide, styles, templates, tokens, versions)
 from .config import Settings
 from .db import Database
@@ -137,13 +137,17 @@ def build(db: Database, settings: Settings, store: storage.Store | None = None,
     @server.tool()
     def list_workspaces(ctx: Context) -> dict:
         """Workspaces you can see, each with its canvases (tabs): ids, names,
-        revisions and node/edge counts, and your role (owner, editor, viewer);
-        plus the user's folders (folder_id null = top level)."""
+        revisions and node/edge counts, your role (owner, editor, viewer) and
+        the org that owns it (null = the user's or someone's personal
+        workspace); plus the user's folders (folder_id null = top level) and
+        the orgs they're in."""
         def go(s, user, who):
             filed = folders.placements(s, user)
             return {"folders": [folders.out(f) for f in folders.all_for(s, user)],
+                    "orgs": [{"id": o.id, "name": o.name, "role": r} for o, r in orgs.mine(s, user)],
                     "workspaces": [{"id": ws.id, "name": ws.name, "folder_id": filed.get(ws.id),
                                     "role": access.role_on(s, user, ws),
+                                    "org": {"id": ws.org.id, "name": ws.org.name} if ws.org else None,
                                     "canvases": [ops.summary(c) for c in ws.canvases]}
                                    for ws in access.visible_workspaces(s, user)]}
         return run(ctx, go)
@@ -164,12 +168,17 @@ def build(db: Database, settings: Settings, store: storage.Store | None = None,
 
     @server.tool()
     def create_workspace(ctx: Context, name: Annotated[str, Field(min_length=1, max_length=200)],
-                         folder_id: str | None = None) -> dict:
-        """Create a workspace with one empty canvas, optionally in a folder."""
+                         folder_id: str | None = None,
+                         org_id: Annotated[str | None, Field(
+                             description="An org from list_workspaces to own it; omit for the "
+                                         "user's personal space.")] = None) -> dict:
+        """Create a workspace with one empty canvas, optionally in a folder or owned by an org."""
         def go(s, user, who):
             if folder_id:
                 folders.get(s, user, folder_id)
-            ws = Workspace(owner_id=user.id, name=name.strip())
+            if org_id and not access.org_role(s, user, org_id):
+                raise ToolError("org not found")
+            ws = Workspace(owner_id=user.id, name=name.strip(), org_id=org_id or None)
             s.add(ws)
             s.flush()
             if folder_id:

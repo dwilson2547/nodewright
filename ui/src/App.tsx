@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ReactFlowProvider } from "@xyflow/react";
-import { api, ApiError, type CanvasMeta, type Config, type Folder, type Me, type Workspace } from "./api";
+import { api, ApiError, type CanvasMeta, type Config, type Folder, type Me, type Org, type Workspace } from "./api";
 import { Editor, type EditorHandle, type SaveStatus } from "./Editor";
 import { AgentSettings } from "./Settings";
+import { OrgsDialog } from "./OrgsDialog";
 import { ShareDialog } from "./ShareDialog";
 import { Sidebar } from "./Sidebar";
 import { TabLinksContext } from "./tablinks";
@@ -95,6 +96,8 @@ export default function App() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
+  const [orgs, setOrgs] = useState<Org[]>([]);
+  const [orgsOpen, setOrgsOpen] = useState(false);
   const [sidebar, setSidebar] = useState(() => localStorage.getItem("nw.sidebar") !== "0");
   const [wsId, setWsId] = useState<string | null>(null);
   const [tabs, setTabs] = useState<CanvasMeta[]>([]);
@@ -122,9 +125,10 @@ export default function App() {
   }, [loadMe]);
 
   const loadWorkspaces = useCallback(async (prefer?: string) => {
-    const [list, fs] = await Promise.all([api.workspaces(), api.folders()]);
+    const [list, fs, os] = await Promise.all([api.workspaces(), api.folders(), api.orgs()]);
     setWorkspaces(list);
     setFolders(fs);
+    setOrgs(os.orgs);
     if (!prefer && linked.current) {
       const c = await api.canvas(linked.current).catch(() => null);
       if (c) {
@@ -234,11 +238,12 @@ export default function App() {
     a.click();
   };
 
-  const newWorkspace = async (folderId: string | null = null) => {
-    const name = prompt("Name for the new workspace", "New workspace")?.trim();
+  const newWorkspace = async (folderId: string | null = null, orgId: string | null = null) => {
+    const org = orgs.find((o) => o.id === orgId);
+    const name = prompt(org ? `Name for the new ${org.name} workspace` : "Name for the new workspace", "New workspace")?.trim();
     if (!name) return;
     await leave();
-    const w = await api.createWorkspace(name).catch(fail);
+    const w = await api.createWorkspace(name, orgId).catch(fail);
     if (w) {
       if (folderId) await api.fileWorkspace(w.id, folderId).catch(fail);
       setTabId(null);
@@ -358,15 +363,16 @@ export default function App() {
         }} />
         <button onClick={() => setShareOpen(true)} disabled={!ws}
           title={owner ? "Members and read-only links" : "Who has access"}>Share</button>
+        <button onClick={() => setOrgsOpen(true)} title="Organisations you're in, and their people">Orgs</button>
         <button onClick={() => setSettingsOpen(true)} title="Access tokens and style guide for AI agents (MCP)">Agents</button>
         <span className="muted">{me.username}</span>
         <button onClick={signOut}>Sign out</button>
       </header>
       <div className="body">
       {sidebar && (
-        <Sidebar folders={folders} workspaces={workspaces} current={wsId} act={{
+        <Sidebar folders={folders} workspaces={workspaces} orgs={orgs} current={wsId} act={{
           open: (id) => { if (id !== wsId) void switchWorkspace(id); },
-          newWorkspace: (f) => void newWorkspace(f),
+          newWorkspace: (f, o) => void newWorkspace(f, o ?? null),
           newFolder: (p) => void newFolder(p),
           renameFolder: (f) => void renameFolder(f),
           deleteFolder: (f) => void deleteFolder(f),
@@ -403,9 +409,14 @@ export default function App() {
       </div>
       </div>
       {settingsOpen && <AgentSettings onClose={() => setSettingsOpen(false)} />}
+      {orgsOpen && <OrgsDialog me={me.username} onClose={() => setOrgsOpen(false)} onChanged={() => void refreshTree()} />}
       {shareOpen && ws && (
         <ShareDialog workspace={ws} canvasId={tabId} canvasName={tabs.find((t) => t.id === tabId)?.name ?? ""}
-          me={me.username} onClose={() => setShareOpen(false)} onLeft={() => void leftWorkspace()} />
+          me={me.username} onClose={() => setShareOpen(false)} onLeft={() => void leftWorkspace()}
+          onMoved={(visible) => {
+            if (visible) void refreshTree();
+            else void leftWorkspace();
+          }} />
       )}
     </div>
   );

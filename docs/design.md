@@ -231,7 +231,8 @@ of editor polish.
    ✅ schema nodes (0.14.0) → ✅ versions (0.15.0, §14; ✅ user: per tab, not per schema or per
    workspace) → ✅ schematic symbols, junctions and net labels (0.16.0, §15) → ✅ schematic wiring
    (0.17.0, §16) → ✅ colour by net (0.18.0, §17) → ✅ manual edge waypoints (0.19.0, §18) →
-   organisations and roles.
+   ✅ organisations and roles (0.20.0, §19). Next (✅ user, 2026-10-12): org-shared libraries
+   (templates, icons, style guide).
 6. **Stretch:** marketplace (§11.5), custom roles.
 
 Full MCP OAuth (§6.2) was pulled forward and shipped as 0.3.0 (✅ user asked for browser sign-in).
@@ -265,7 +266,7 @@ updates, style guides, shapes and line styles, templates, tab links, attachments
 Alembic migrations, CI and the unused-attachment sweep. 0.8.0 added workspace members, 0.9.0 workspace zip
 export, 0.10.0 edge corner radius, 0.11.0 node ports, 0.12.0 icons, 0.13.0 icon creator, 0.14.0
 schema nodes, 0.15.0 versions, 0.16.0 schematic symbols, 0.17.0 schematic wiring, 0.18.0 colour
-by net, 0.19.0 manual edge waypoints. Not yet: organisations, zip import. Live updates are in-process, so the chart must stay at
+by net, 0.19.0 manual edge waypoints, 0.20.0 organisations. Not yet: org-shared libraries, zip import. Live updates are in-process, so the chart must stay at
 one replica until `events.py` moves to Postgres LISTEN/NOTIFY.
 
 ## 11. Future: collaboration and community 📐
@@ -293,9 +294,7 @@ several people's agents don't fight over one document.
     tabs and sidebar hide what a member's role can't do.
   - Custom roles later: a `roles` table holding an action set per org. Org admins pick built-ins or
     define their own.
-- **Organisations** later: `orgs`, `org_members(org, user, org_role)`, and workspaces owned by an
-  org. Optional mapping from an authentik group claim to org membership/role at sign-in, the same
-  way dxf-converter maps its admin group.
+- **Organisations** ✅ (0.20.0): see §19.
 - Schema changes are Alembic migrations (`api/nodewright/migrations/`, 0.7.0). `db.migrate()` runs
   at startup; a database made by the old `create_all` is stamped at the `0001` baseline first.
 
@@ -630,3 +629,55 @@ Not done: agents can't toggle it (no tool sets top-level keys); a legend of nets
   them relative to the fragment and offset them when inserted (server and editor).
 
 Not done: waypoints following their nodes; the "+" can sit on a label at the middle of a leg.
+
+## 19. Organisations ✅ (0.20.0, `orgs.py`, `access.py`, `ui/src/OrgsDialog.tsx`)
+
+Decisions (✅ user, 2026-10-12): anyone signed in may create an org; authentik group mapping in this
+release; org-shared libraries (templates, icons, style guide) are the follow-up.
+
+- **Schema** (migration `0007`): `orgs(id, name UNIQUE)`, `org_members(org_id, user_id, role
+  admin|member, source manual|authentik)`, and on `workspaces`: `org_id` (null = personal;
+  `ON DELETE RESTRICT`) and `org_access` (none | viewer | editor, default editor). On an org's
+  workspace `owner_id` only records who last owned it and grants nothing. Users are never deleted,
+  so its `CASCADE` can't remove org workspaces.
+- **Access** (`access.role_on`), the highest of:
+  - owner: a personal workspace's owner, or an admin of the org that owns it;
+  - `org_access` for any member of that org;
+  - the user's own `workspace_members` row. Guests from outside the org are added this way.
+
+  The creator of an org workspace has no special rights: a plain member can't rename it.
+- **Running an org:**
+  - Admins add existing users by exact username (no invites), change roles and remove people;
+    anyone can leave.
+  - An org always keeps one admin.
+  - It can be deleted only when it owns no workspaces.
+  - Removing someone keeps any workspace they were added to by name. Their edit leases and folder
+    filings go wherever they lost access (`orgs.lost_access`), and the same happens when
+    `org_access` is lowered or a workspace moves.
+- **Moving** (`POST /api/workspaces/{id}/move`, needs `workspace.manage`): into an org the actor is
+  in, or out of one to a member's personal space (`owner`, default the actor). Workspace members
+  keep their rows.
+- **authentik groups:** `ORG_GROUPS` (Helm `orgGroups`) maps a group to an org name and role.
+  - At each sign-in, `orgs.sync_groups` creates a mapped org when first needed, then adds,
+    changes or removes the user's memberships with source `authentik` to match their groups.
+  - Only mapped orgs and authentik-sourced rows are touched: a membership added by hand stays.
+  - Synced rows can't be edited in nodewright (409), and a mapped org can't be renamed.
+  - A missing `groups` claim skips the sync rather than removing anyone.
+  - Changes apply at the next sign-in.
+  - nodewright's provider uses the same profile scope that dxf-converter reads its groups from.
+    ⚠ unverified: that nodewright's ID token carries `groups` in production; no mapping is
+    configured yet.
+- **REST:** `GET/POST /api/orgs`, `PATCH/DELETE /api/orgs/{id}`,
+  `GET/POST /api/orgs/{id}/members`, `PATCH/DELETE /api/orgs/{id}/members/{user}`.
+  `POST /api/workspaces` takes `org_id`; `PATCH` takes `org_access`. Workspaces carry `org`, and
+  `owner` is the org's name for an org's workspace.
+- **MCP:** `list_workspaces` returns `orgs` and each workspace's `org`; `create_workspace` takes
+  `org_id`. Agents can't manage orgs.
+- **UI:**
+  - The **Orgs** header button opens the Organisations dialog.
+  - The sidebar has a heading per org (with "+") under the user's folders, listing that org's
+    workspaces not filed in a folder. Filing never changes a workspace's org.
+  - The Share dialog has an "Everyone in <org>" access row and a Move section.
+
+Not done: org-shared libraries; custom roles (`access.ROLES` stays the lookup table a per-org
+roles table would replace); a commenter role.
