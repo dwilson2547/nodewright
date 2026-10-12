@@ -1,13 +1,17 @@
 // One edge type for every edge: picks the path for its pathfindingMethod and
 // steers around the other nodes on the canvas (routing.ts). Wires between
-// schematic parts are routed together instead (wires.ts).
-import { createContext, memo, useCallback, useContext, useMemo } from "react";
+// schematic parts are routed together instead (wires.ts). An edge with
+// waypoints (design §18) is drawn through them instead of routed.
+import { createContext, memo, useCallback, useContext, useMemo, type PointerEvent as ReactPointerEvent } from "react";
 import {
-  BaseEdge, getBezierPath, getSmoothStepPath, getStraightPath, useStore,
+  BaseEdge, EdgeLabelRenderer, getBezierPath, getSmoothStepPath, getStraightPath, useReactFlow, useStore,
   type EdgeProps, type ReactFlowState,
 } from "@xyflow/react";
 import type { CEdge, CNode } from "./canvasMapping";
-import { bezierHits, labelPoint, midpoint, orthoRoute, polyPath, type Rect, type Side } from "./routing";
+import {
+  along, bezierAt, bezierHits, curveThrough, joinLegs, labelPoint, orthoLegs, orthoRoute, polyPath, waypointsOf,
+  type Pt, type Rect, type Side,
+} from "./routing";
 import { attr, cornerRadius } from "./styles";
 import { wireKey, wiresFor } from "./wires";
 
@@ -74,8 +78,74 @@ const labelBox = (label: unknown): [number, number] =>
 /** The document's colorByNet: wires take their net's colour unless given one (wires.ts). */
 export const NetColours = createContext(false);
 
+/** How the editor changes an edge's waypoints; null where lines can't be edited. */
+export type WaypointEditor = {
+  /** New waypoints for the edge, or [] to go back to automatic routing. */
+  set: (edgeId: string, wps: Pt[]) => void;
+  /** A point dropped by the user, snapped to the grid if snapping is on. */
+  snap: (p: Pt) => Pt;
+};
+export const Waypoints = createContext<WaypointEditor | null>(null);
+
+// A plain click on a "+" does nothing; dragging it this far adds the waypoint.
+const DRAG_START = 3;
+
+/** Handles on a selected line: one per waypoint (drag to move, double-click
+ * to remove) and a "+" in the middle of each leg (drag to add one there). */
+function WaypointHandles({ id, wps, mids, edit }: { id: string; wps: Pt[]; mids: Pt[]; edit: WaypointEditor }) {
+  const flow = useReactFlow();
+  const drag = (e: ReactPointerEvent, index: number, insert: boolean) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    e.preventDefault();
+    const at = (ev: { clientX: number; clientY: number }) =>
+      edit.snap(flow.screenToFlowPosition({ x: ev.clientX, y: ev.clientY }));
+    const x0 = e.clientX, y0 = e.clientY;
+    let list: Pt[] | null = insert ? null : [...wps];
+    const move = (ev: PointerEvent) => {
+      const p = at(ev);
+      if (!list) {
+        if (Math.hypot(ev.clientX - x0, ev.clientY - y0) < DRAG_START) return;
+        list = [...wps.slice(0, index), p, ...wps.slice(index)];
+      } else if (list[index].x === p.x && list[index].y === p.y) {
+        return;
+      } else {
+        list = list.map((q, i) => (i === index ? p : q));
+      }
+      edit.set(id, list);
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+  const place = (p: Pt) => ({ transform: `translate(-50%, -50%) translate(${p.x}px, ${p.y}px)` });
+  return (
+    <EdgeLabelRenderer>
+      {mids.map((p, i) => (
+        <div key={`m${i}`} className="nw-wp-add nodrag nopan" style={place(p)}
+          title="Drag to bend the line here" onPointerDown={(e) => drag(e, i, true)} />
+      ))}
+      {wps.map((p, i) => (
+        <div key={`w${i}`} className="nw-wp nodrag nopan" style={place(p)}
+          title="Drag to move · double-click to remove"
+          onPointerDown={(e) => drag(e, i, false)}
+          onDoubleClick={(e) => {
+            e.stopPropagation();
+            edit.set(id, wps.filter((_, j) => j !== i));
+          }} />
+      ))}
+    </EdgeLabelRenderer>
+  );
+}
+
 export const RoutedEdge = memo((p: EdgeProps<CEdge>) => {
   const byNet = useContext(NetColours);
+  const edit = useContext(Waypoints);
+  const raw = p.data?.raw;
+  const wps = useMemo(() => waypointsOf(raw), [raw]);
   const method = attr(p.data?.raw ?? {}, "pathfindingMethod");
   const radius = cornerRadius(p.data?.raw ?? {});
   const select = useCallback((s: ReactFlowState) => obstacleKey(s, p.source, p.target),
@@ -86,31 +156,48 @@ export const RoutedEdge = memo((p: EdgeProps<CEdge>) => {
   const { sourceX: sx, sourceY: sy, targetX: tx, targetY: ty } = p;
   const sSide = p.sourcePosition as Side, tSide = p.targetPosition as Side;
 
-  const [path, lx, ly] = useMemo((): [string, number, number] => {
-    if (wire) return [wire.d, wire.label.x, wire.label.y];
+  // The path, where its label goes, and the middle of each leg (for "+" handles).
+  const [path, lx, ly, mids] = useMemo((): [string, number, number, Pt[]] => {
+    if (wire) return [wire.d, wire.label.x, wire.label.y, wire.mids];
     const base = { sourceX: sx, sourceY: sy, targetX: tx, targetY: ty,
       sourcePosition: p.sourcePosition, targetPosition: p.targetPosition };
+    const s = { x: sx, y: sy }, t = { x: tx, y: ty };
+    // With a label in the middle, a lone "+" goes a quarter of the way along instead.
+    const u = p.label ? 0.25 : 0.5;
+    const orthogonal = method === "square" || method === "a-star";
+    if (wps.length) {
+      const [obstacles, frames] = parse(key);
+      const place = (pts: Pt[]) => (p.label ? labelPoint(pts, ...labelBox(p.label), obstacles, frames) : along(pts, 0.5));
+      if (orthogonal || method === "direct") {
+        const legs = orthogonal ? orthoLegs(s, sSide, wps, t, tSide)
+          : [s, ...wps].map((a, i) => [a, [...wps, t][i]]);
+        const { pts, mids: m } = joinLegs(legs);
+        const at = place(pts);
+        return [polyPath(pts, orthogonal ? radius ?? (method === "square" ? 0 : 12) : 0), at.x, at.y, m];
+      }
+      const ctl = [s, ...wps, t];
+      const at = place(ctl);
+      return [curveThrough(s, sSide, wps, t, tSide), at.x, at.y, ctl.slice(1).map((b, i) => along([ctl[i], b], 0.5))];
+    }
     if (method === "direct") {
       const [d, x, y] = getStraightPath(base);
-      return [d, x, y];
+      return [d, x, y, [along([s, t], u)]];
     }
     const [obstacles, frames] = parse(key);
-    const s = { x: sx, y: sy }, t = { x: tx, y: ty };
-    const orthogonal = method === "square" || method === "a-star";
     if (orthogonal || bezierHits(s, sSide, t, tSide, obstacles)) {
       const pts = orthoRoute(s, sSide, t, tSide, obstacles);
       if (pts) {
-        const m = p.label ? labelPoint(pts, ...labelBox(p.label), obstacles, frames) : midpoint(pts);
-        return [polyPath(pts, radius ?? (method === "square" ? 0 : 12)), m.x, m.y];
+        const m = p.label ? labelPoint(pts, ...labelBox(p.label), obstacles, frames) : along(pts, 0.5);
+        return [polyPath(pts, radius ?? (method === "square" ? 0 : 12)), m.x, m.y, [along(pts, u)]];
       }
     }
     if (orthogonal) {
       const [d, x, y] = getSmoothStepPath({ ...base, borderRadius: radius ?? (method === "square" ? 0 : 8) });
-      return [d, x, y];
+      return [d, x, y, [{ x, y }]];
     }
     const [d, x, y] = getBezierPath(base);
-    return [d, x, y];
-  }, [wire, method, radius, key, sx, sy, tx, ty, sSide, tSide, p.sourcePosition, p.targetPosition, p.label]);
+    return [d, x, y, [bezierAt(s, sSide, t, tSide, u)]];
+  }, [wire, wps, method, radius, key, sx, sy, tx, ty, sSide, tSide, p.sourcePosition, p.targetPosition, p.label]);
 
   const width = Number(p.style?.strokeWidth) || 2;
   const style = wire && byNet && !p.data?.raw?.color ? { ...p.style, stroke: wire.color } : p.style;
@@ -142,6 +229,7 @@ export const RoutedEdge = memo((p: EdgeProps<CEdge>) => {
       <circle key={`${d.x},${d.y}`} className="nw-wire-dot" cx={d.x} cy={d.y} r={width + 1.5}
         style={{ fill: style?.stroke }} />
     ))}
+    {p.selected && edit && <WaypointHandles id={p.id} wps={wps} mids={mids} edit={edit} />}
     </>
   );
 });

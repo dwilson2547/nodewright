@@ -55,7 +55,8 @@ plugin) preserves unknown keys when it re-saves a canvas.
 
 Loading only checks `styleAttributes` is an object of strings, so newer plugin values still load;
 agent writes are checked strictly against the table. Snap and grid size are a per-browser editor
-preference, not stored in the canvas. Manual edge waypoints: not built.
+preference, not stored in the canvas. Manual edge waypoints: §18 (0.19.0), an extra `waypoints`
+key on the edge.
 
 ### 3.3 Documents and links ✅ (0.4.0; zip export 0.9.0)
 
@@ -191,7 +192,7 @@ snapped to a 20 px grid. Unpositioned new nodes are laid out as one block and an
 of the existing nodes they connect to. An edge that skips layers gets a placeholder in each layer
 it crosses, so those layers leave a lane open for it (0.5.0).
 
-Edges are routed where they are drawn, since JSON Canvas edges have no waypoints: `ui/src/routing.ts`
+Edges without waypoints (§18) are routed where they are drawn: `ui/src/routing.ts`
 is an orthogonal A* over a sparse grid of lines 20 px outside every node, with a bend penalty
 (0.5.0). The server does not route; placing ops instead return each placed node's box and any
 `overlaps` (pairs of colliding node ids) so an agent can check its work without `get_canvas`.
@@ -229,7 +230,7 @@ of editor polish.
    ✅ node ports (0.11.0) → ✅ icons and built-in set (0.12.0) → ✅ icon creator (0.13.0) →
    ✅ schema nodes (0.14.0) → ✅ versions (0.15.0, §14; ✅ user: per tab, not per schema or per
    workspace) → ✅ schematic symbols, junctions and net labels (0.16.0, §15) → ✅ schematic wiring
-   (0.17.0, §16) → ✅ colour by net (0.18.0, §17) → manual edge waypoints →
+   (0.17.0, §16) → ✅ colour by net (0.18.0, §17) → ✅ manual edge waypoints (0.19.0, §18) →
    organisations and roles.
 6. **Stretch:** marketplace (§11.5), custom roles.
 
@@ -264,7 +265,7 @@ updates, style guides, shapes and line styles, templates, tab links, attachments
 Alembic migrations, CI and the unused-attachment sweep. 0.8.0 added workspace members, 0.9.0 workspace zip
 export, 0.10.0 edge corner radius, 0.11.0 node ports, 0.12.0 icons, 0.13.0 icon creator, 0.14.0
 schema nodes, 0.15.0 versions, 0.16.0 schematic symbols, 0.17.0 schematic wiring, 0.18.0 colour
-by net. Not yet: organisations, zip import. Live updates are in-process, so the chart must stay at
+by net, 0.19.0 manual edge waypoints. Not yet: organisations, zip import. Live updates are in-process, so the chart must stay at
 one replica until `events.py` moves to Postgres LISTEN/NOTIFY.
 
 ## 11. Future: collaboration and community 📐
@@ -580,11 +581,12 @@ follow-up.
   A junction symbol is its own dot.
 - **Captions** go on the first side of a symbol without pins (below, right, left, above), so a
   vertical part's caption sits beside it.
-- New wires (editor or agent) default to no arrowhead. Nothing about routing is stored: JSON
-  Canvas has no waypoints, and Obsidian draws the same edges its own way.
+- New wires (editor or agent) default to no arrowhead. Automatic routes aren't stored: Obsidian
+  draws the same edges its own way. A wire with waypoints (§18) is drawn through them and placed
+  before the rest, which route around it; it still hops and gets dots.
 
-Not done: wire-to-wire joins (attaching a wire to the middle of another),
-waypoints, and stored routes for other readers.
+Not done: wire-to-wire joins (attaching a wire to the middle of another), and stored routes for
+other readers.
 
 ## 17. Colour by net ✅ (0.18.0, `wires.ts` colours, `edges.tsx` NetColours)
 
@@ -601,3 +603,30 @@ editor's **Net colours** toggle (shown when the tab has wires) is one undoable e
   shift a later net's colour; that trade was taken over same-coloured neighbours.
 
 Not done: agents can't toggle it (no tool sets top-level keys); a legend of nets and colours.
+
+## 18. Manual edge waypoints ✅ (0.19.0, `routing.ts` orthoLegs/curveThrough, `edges.tsx` WaypointHandles)
+
+✅ user (2026-10-12): waypoints stay put when a node moves, for now.
+
+- **Stored** as `"waypoints": [{"x", "y"}, …]` on the edge, in canvas coordinates. It's an extra
+  key, so Obsidian ignores it and draws its own route. `canvas_format` rounds the points to
+  integers and allows at most 100 per edge.
+- **Drawn** through the waypoints in the edge's own style, skipping the router: straight segments
+  for `direct`, right angles for `square`/`a-star` (each leg bends once, carrying on the way it
+  was going unless that doubles back; corner radius applies), and a Catmull-Rom curve for the
+  default, leaving and arriving square to the node's side. Edges without waypoints route exactly
+  as before.
+- **Wires** (§16) with waypoints get right angles, are placed first, and the automatic wires
+  route around them; hops and dots work as before.
+- **Editing:** a selected line shows a handle per waypoint and a "+" in the middle of each leg
+  (a quarter of the way along when there are no waypoints and the line has a label). Drag a
+  handle to move it, snapped to the grid when snap is on. Drag a "+" to add a waypoint (a plain
+  click does nothing). Double-click a handle to remove it. **Reset route** clears them all.
+  Handles sit in React Flow's edge label layer, raised above a selected edge.
+- **Moving nodes:** waypoints stay put, except on lines whose both ends move in the same drag
+  (a multi-selection, or the contents of a dragged group); those move with it.
+- **Agents** set `waypoints` on `add_elements`/`update_elements` (null clears them). `layout`
+  clears them on edges touching a node it moved and reports `routes_cleared`. Templates store
+  them relative to the fragment and offset them when inserted (server and editor).
+
+Not done: waypoints following their nodes; the "+" can sit on a label at the middle of a leg.

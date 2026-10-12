@@ -294,6 +294,8 @@ def _clean_edge(raw: dict, ids: set[str]) -> dict:
         if k not in e:
             raise OpError(f"edge needs {k}")
     _clean_style(e, styles.EDGE, "edge")
+    if "waypoints" in e:
+        e["waypoints"] = _waypoints(e["waypoints"])
     try:
         ports.check_edge(e, "edge")
     except ValueError as exc:
@@ -305,6 +307,13 @@ def _clean_edge(raw: dict, ids: set[str]) -> dict:
         e["id"] = new_id()
     ids.add(e["id"])
     return e
+
+
+def _waypoints(v) -> list[dict]:
+    try:
+        return canvas_format.waypoints(v, "waypoints")
+    except canvas_format.CanvasError as exc:
+        raise OpError(str(exc)) from None
 
 
 def _schematic(n: dict | None) -> bool:
@@ -494,6 +503,10 @@ def update_elements(updates: list[dict], icon_ports: IconPorts | None = None):
                     continue
                 if k in ("fromPort", "toPort") and v is not None:
                     repointed.append(target)
+                if k == "waypoints" and v is not None:
+                    if "fromNode" not in target:
+                        raise OpError("waypoints go on edges")
+                    v = _waypoints(v) or None
                 if k == "ports" and v is not None:
                     try:
                         v = ports.check(v, "node")
@@ -579,7 +592,14 @@ def relayout(node_ids: list[str] | None, direction: str = "TB"):
         for i, (x, y, w, h) in boxes.items():
             n = by_id[i]
             n["x"], n["y"], n["width"], n["height"] = ox + x, oy + y, w, h
-        return {"laid_out": len(boxes), **geometry(data, list(boxes))}
+        # A manual route (design §18) would point at where the nodes were.
+        cleared = 0
+        for e in data["edges"]:
+            if "waypoints" in e and (e["fromNode"] in boxes or e["toNode"] in boxes):
+                del e["waypoints"]
+                cleared += 1
+        return {"laid_out": len(boxes), **({"routes_cleared": cleared} if cleared else {}),
+                **geometry(data, list(boxes))}
 
     return op
 

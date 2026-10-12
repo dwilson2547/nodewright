@@ -268,7 +268,10 @@ def build(db: Database, settings: Settings, store: storage.Store | None = None,
                                      "('none'|'arrow', default toEnd arrow), fromSide/toSide "
                                      "(top|right|bottom|left; omit to let the editor choose), "
                                      "fromPort/toPort (a port id on that node; the side then "
-                                     "follows the port). "
+                                     "follows the port), waypoints ([{x, y}, ...] in canvas "
+                                     "coordinates: a manual route the line is drawn through in "
+                                     "order, in its own style; omit to route automatically; "
+                                     "waypoints stay put when nodes move). "
                                      + EDGE_STYLE)
                      ] = [],  # noqa: B006
                      direction: Direction = "TB") -> dict:
@@ -292,7 +295,8 @@ def build(db: Database, settings: Settings, store: storage.Store | None = None,
                                         "only the shape, {styleAttributes: {path: null}} resets "
                                         "one attribute.")]) -> dict:
         """Change existing nodes or edges: text, colour, label, geometry, ends, sides,
-        ports, fromPort/toPort, styleAttributes (see add_elements for the values).
+        ports, fromPort/toPort, waypoints (null goes back to automatic routing),
+        styleAttributes (see add_elements for the values).
         Setting a node's ports replaces the whole list; edges on a port that no
         longer exists keep their side."""
         return write(ctx, canvas_id, make=lambda s: ops.update_elements(
@@ -308,8 +312,9 @@ def build(db: Database, settings: Settings, store: storage.Store | None = None,
     def layout(ctx: Context, canvas_id: str, node_ids: list[str] | None = None,
                direction: Direction = "TB") -> dict:
         """Tidy nodes into a layered layout following the edges (all nodes by
-        default). Groups move with their contents and are refitted. Returns each
-        moved node's box and any `overlaps`."""
+        default). Groups move with their contents and are refitted. Edges touching
+        a moved node lose their waypoints (counted in `routes_cleared`). Returns
+        each moved node's box and any `overlaps`."""
         return write(ctx, canvas_id, ops.relayout(node_ids, direction))
 
     @server.tool()

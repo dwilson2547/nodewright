@@ -7,7 +7,9 @@
 // is saved: it's worked out from the document whenever it's drawn.
 import type { ReactFlowState } from "@xyflow/react";
 import { portFromHandle, portsOf, type Port } from "./ports";
-import { DIRS, Heap, labelPoint, SIDE_DIR, simplify, type Pt, type Rect, type Side } from "./routing";
+import {
+  along, DIRS, Heap, joinLegs, labelPoint, orthoLegs, SIDE_DIR, simplify, waypointsOf, type Pt, type Rect, type Side,
+} from "./routing";
 import { attr } from "./styles";
 import { captionSide } from "./nodes";
 
@@ -32,10 +34,18 @@ type WNode = Box & {
   /** A ground symbol: its net is "gnd". */
   ground?: true;
 };
-type WEdge = { id: string; source: string; target: string; sp: string | null; tp: string | null; label?: string };
+type WEdge = {
+  id: string; source: string; target: string; sp: string | null; tp: string | null; label?: string;
+  /** Manual route (design §18): drawn through these, not routed. */
+  wp?: Pt[];
+};
 type Input = { nodes: WNode[]; edges: WEdge[] };
 
-export type Wire = { d: string; label: Pt; dots: Pt[]; /** The net's colour, for colour by net. */ color: string };
+export type Wire = {
+  d: string; label: Pt; dots: Pt[]; /** The net's colour, for colour by net. */ color: string;
+  /** Where the editor offers to add a waypoint: the middle of each leg. */
+  mids: Pt[];
+};
 
 // Colour by net (design §17): each net gets a colour from its name, so it
 // stays put as parts move. Ground stays the default grey.
@@ -114,7 +124,9 @@ export function wireKey(s: ReactFlowState): string {
     if (!schematic(byId.get(e.source)) || !schematic(byId.get(e.target))) continue;
     const sp = portFromHandle(e.sourceHandle), tp = portFromHandle(e.targetHandle);
     if (!sp || !tp) continue;
-    edges.push({ id: e.id, source: e.source, target: e.target, sp, tp, label: raw.label || undefined });
+    const wp = waypointsOf(raw);
+    edges.push({ id: e.id, source: e.source, target: e.target, sp, tp, label: raw.label || undefined,
+      ...(wp.length ? { wp } : {}) });
   }
   lastNodes = s.nodes;
   lastEdges = s.edges;
@@ -373,9 +385,16 @@ function route(input: Input): Map<string, Wire> {
   // full pass (if their pins haven't moved); the rest route around them. The
   // drop re-routes everything.
   const dragging = input.nodes.some((n) => n.drag);
-  const done: { job: Job; pts: Pt[] }[] = [];
+  const done: { job: Job; pts: Pt[]; mids?: Pt[] }[] = [];
   const todo: Job[] = [];
+  // Wires with waypoints are drawn where they were put; the rest route around them.
   for (const job of jobs) {
+    if (!job.e.wp) continue;
+    const { pts, mids } = joinLegs(orthoLegs(job.s, job.ss, job.e.wp, job.t, job.ts, WIRE_MARGIN));
+    done.push({ job, pts, mids });
+  }
+  for (const job of jobs) {
+    if (job.e.wp) continue;
     const was = dragging ? settled.get(job.e.id) : undefined;
     const moving = nodes.get(job.e.source)?.drag || nodes.get(job.e.target)?.drag;
     if (was && !moving && same(was.pts[0], job.s) && same(was.pts[was.pts.length - 1], job.t)) done.push({ job, pts: was.pts });
@@ -439,10 +458,10 @@ function route(input: Input): Map<string, Wire> {
 
   const palette = colours(done.map((d) => nameOf(d.job.e)));
   const out = new Map<string, Wire>();
-  for (const { job, pts } of done) {
+  for (const { job, pts, mids } of done) {
     const label = job.e.label ? labelPoint(pts, String(job.e.label).length * 6 + 12, 18, obstacles, []) : pts[0];
     out.set(job.e.id, { d: hopPath(pts, hops.get(job.e.id) ?? []), label, dots: dots.get(job.e.id) ?? [],
-      color: palette.get(nameOf(job.e))! });
+      color: palette.get(nameOf(job.e))!, mids: mids ?? [along(pts, job.e.label ? 0.25 : 0.5)] });
   }
   return out;
 }

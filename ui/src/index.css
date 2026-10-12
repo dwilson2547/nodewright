@@ -90,6 +90,15 @@ input[type="color"] { width: 24px; height: 22px; padding: 0; border: none; backg
 .react-flow__node.selected .nw-node { box-shadow: 0 0 0 2px var(--accent); }
 /* A selected edge: a soft accent band behind the line (edges.tsx), whatever its colour. */
 .nw-edge-halo { fill: none; stroke: var(--accent); stroke-opacity: .5; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
+/* Waypoint handles on a selected line (design §18): drawn over the canvas by EdgeLabelRenderer. */
+/* Above a selected line, which React Flow raises to z-index 1000; only these handles use this layer. */
+.react-flow__edgelabel-renderer { z-index: 2000; }
+.nw-wp, .nw-wp-add { position: absolute; pointer-events: all; box-sizing: border-box; border-radius: 50%; }
+.nw-wp { width: 12px; height: 12px; background: var(--bg); border: 2px solid var(--accent); cursor: move; }
+.nw-wp-add { width: 14px; height: 14px; background: var(--accent); color: #fff; opacity: .45; cursor: copy;
+  font: 600 12px/14px system-ui, sans-serif; text-align: center; }
+.nw-wp-add::before { content: "+"; }
+.nw-wp-add:hover { opacity: 1; }
 /* style extensions (styles.ts) */
 .nw-node.border-dashed { border-style: dashed; }
 .nw-node.border-dotted { border-style: dotted; }

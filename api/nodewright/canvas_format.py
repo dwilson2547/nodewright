@@ -16,6 +16,7 @@ ENDS = {"none", "arrow"}
 GEOMETRY = ("x", "y", "width", "height")
 MAX_NODES = 20_000
 MAX_EDGES = 40_000
+MAX_WAYPOINTS = 100
 
 
 class CanvasError(ValueError):
@@ -47,6 +48,28 @@ def _style(obj: dict, where: str) -> None:
         return
     if not isinstance(sa, dict) or not all(isinstance(v, (str, type(None))) for v in sa.values()):
         raise CanvasError(f"{where}.styleAttributes must be an object of strings")
+
+
+def waypoints(value, where: str) -> list[dict]:
+    """An edge's `waypoints` (design §18): [{x, y}] in canvas coordinates,
+    rounded to integers. The line is drawn through them in order."""
+    if not isinstance(value, list):
+        raise CanvasError(f"{where} must be an array of {{x, y}}")
+    if len(value) > MAX_WAYPOINTS:
+        raise CanvasError(f"{where} has more than {MAX_WAYPOINTS} points")
+    out = []
+    for i, p in enumerate(value):
+        if not isinstance(p, dict):
+            raise CanvasError(f"{where}[{i}] must be an object {{x, y}}")
+        out.append({**p, "x": _int(p.get("x"), f"{where}[{i}].x"), "y": _int(p.get("y"), f"{where}[{i}].y")})
+    return out
+
+
+def shift_waypoints(edges: list[dict], dx: int, dy: int) -> None:
+    """Move every edge's waypoints by (dx, dy), as when its nodes are copied elsewhere."""
+    for e in edges:
+        if isinstance(e.get("waypoints"), list):
+            e["waypoints"] = [{**p, "x": p["x"] + dx, "y": p["y"] + dy} for p in e["waypoints"]]
 
 
 def validate(doc) -> dict:
@@ -110,6 +133,7 @@ def validate(doc) -> dict:
         out_nodes.append(n)
 
     edge_ids: set[str] = set()
+    out_edges = []
     for i, edge in enumerate(edges):
         where = f"edges[{i}]"
         if not isinstance(edge, dict):
@@ -135,9 +159,12 @@ def validate(doc) -> dict:
             ports.check_edge(edge, where)
         except ValueError as exc:
             raise CanvasError(str(exc)) from None
+        if "waypoints" in edge:
+            edge = {**edge, "waypoints": waypoints(edge["waypoints"], f"{where}.waypoints")}
+        out_edges.append(edge)
 
     out["nodes"] = out_nodes
-    out["edges"] = list(edges)
+    out["edges"] = out_edges
     return out
 
 

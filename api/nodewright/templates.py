@@ -161,6 +161,7 @@ def normalize(data, kind: str) -> dict:
         for n in doc["nodes"]:
             n["x"] -= x0
             n["y"] -= y0
+        canvas_format.shift_waypoints(doc["edges"], -x0, -y0)
     if len(json.dumps(doc)) > MAX_BYTES:
         raise TemplateError("template is too large")
     return doc
@@ -256,4 +257,5 @@ def instantiate(data: dict, x: int, y: int, taken: set[str]) -> dict:
     for e in doc["edges"]:
         e["id"] = fresh()
         e["fromNode"], e["toNode"] = ids[e["fromNode"]], ids[e["toNode"]]
+    canvas_format.shift_waypoints(doc["edges"], x, y)
     return doc

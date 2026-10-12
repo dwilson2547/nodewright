@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.19.0 - 2026-10-12
+
+### Added
+- **Waypoints** on lines: select a line and drag the "+" in the middle of a leg to bend it there.
+  Drag a waypoint to move it, double-click it to remove it, or use **Reset route** to go back to
+  automatic routing. The line is drawn through its waypoints in its own style: straight, right
+  angles, or a smooth curve. Schematic wires with waypoints keep their right angles, and the
+  other wires route around them.
+- Waypoints stay put when you move a node. Lines with both ends in a dragged selection or group
+  move with it.
+- Agents can set or clear `waypoints` on lines. The layout tool clears them on lines whose nodes
+  it moves. Templates keep a line's waypoints.
+
 ## 0.18.0 - 2026-10-11
 
 ### Added

@@ -1,4 +1,4 @@
-// Edge routing around nodes. JSON Canvas edges carry no waypoints, so routes
+// Edge routing around nodes. Unless an edge has waypoints (design §18), routes
 // are computed whenever an edge is drawn: an orthogonal A* over a sparse grid
 // whose lines run MARGIN outside every obstacle (Wybrow-style connector
 // routing), with a penalty per bend so routes stay simple.
@@ -218,4 +218,87 @@ export function bezierHits(s: Pt, sSide: Side, t: Pt, tSide: Side, obstacles: Re
     if (obstacles.some((r) => x > r.x0 && x < r.x1 && y > r.y0 && y < r.y1)) return true;
   }
   return false;
+}
+
+// --- manual routes (design §18) ----------------------------------------------
+// An edge with waypoints skips the router: it's drawn through them in its own
+// style. Each "leg" runs from one point (an end or a waypoint) to the next.
+
+/** Right-angle legs from s (leaving through sSide, `stub` px straight out)
+ * through each waypoint to t (arriving through tSide). A leg between points
+ * that don't line up bends once, carrying on the way it was going if it can. */
+export function orthoLegs(s: Pt, sSide: Side, wps: Pt[], t: Pt, tSide: Side, stub = MARGIN): Pt[][] {
+  const sd = DIRS[SIDE_DIR[sSide]], td = DIRS[SIDE_DIR[tSide]];
+  const s1 = { x: s.x + sd.x * stub, y: s.y + sd.y * stub };
+  const t1 = { x: t.x + td.x * stub, y: t.y + td.y * stub };
+  const stops = [...wps, t1];
+  const legs: Pt[][] = [];
+  let at = s1, horiz = sd.y === 0, sign = horiz ? sd.x : sd.y;
+  for (let i = 0; i < stops.length; i++) {
+    const q = stops[i];
+    const leg: Pt[] = i === 0 ? [s, s1] : [at];
+    if (at.x !== q.x && at.y !== q.y) {
+      // Keep going the same way unless that means doubling back.
+      const ahead = horiz ? Math.sign(q.x - at.x) === sign : Math.sign(q.y - at.y) === sign;
+      const first = ahead === horiz;
+      leg.push(first ? { x: q.x, y: at.y } : { x: at.x, y: q.y });
+      horiz = !first;
+    } else if (at.x !== q.x || at.y !== q.y) {
+      horiz = at.y === q.y;
+    }
+    sign = horiz ? Math.sign(q.x - leg[leg.length - 1].x) || sign : Math.sign(q.y - leg[leg.length - 1].y) || sign;
+    leg.push(q);
+    if (i === stops.length - 1) leg.push(t);
+    legs.push(leg);
+    at = q;
+  }
+  return legs;
+}
+
+/** A smooth curve from s through each waypoint to t (Catmull-Rom), leaving
+ * and arriving square to the node's side like the default curve. */
+export function curveThrough(s: Pt, sSide: Side, wps: Pt[], t: Pt, tSide: Side): string {
+  const sd = DIRS[SIDE_DIR[sSide]], td = DIRS[SIDE_DIR[tSide]];
+  const pts = [s, ...wps, t];
+  const n = pts.length;
+  // Phantom points before s and after t chosen so the tangent at s points out
+  // of its side and the tangent at t points into its side, each as long as
+  // the leg next to it.
+  const ks = Math.max(40, Math.hypot(pts[1].x - s.x, pts[1].y - s.y));
+  const kt = Math.max(40, Math.hypot(pts[n - 2].x - t.x, pts[n - 2].y - t.y));
+  const ext = [
+    { x: pts[1].x - 2 * ks * sd.x, y: pts[1].y - 2 * ks * sd.y },
+    ...pts,
+    { x: pts[n - 2].x - 2 * kt * td.x, y: pts[n - 2].y - 2 * kt * td.y },
+  ];
+  let d = `M ${s.x} ${s.y}`;
+  for (let i = 1; i < ext.length - 2; i++) {
+    const p0 = ext[i - 1], p1 = ext[i], p2 = ext[i + 1], p3 = ext[i + 2];
+    const c1 = { x: p1.x + (p2.x - p0.x) / 6, y: p1.y + (p2.y - p0.y) / 6 };
+    const c2 = { x: p2.x - (p3.x - p1.x) / 6, y: p2.y - (p3.y - p1.y) / 6 };
+    d += ` C ${c1.x} ${c1.y} ${c2.x} ${c2.y} ${p2.x} ${p2.y}`;
+  }
+  return d;
+}
+
+/** Point u (0-1) along React Flow's default curve from s to t. */
+export function bezierAt(s: Pt, sSide: Side, t: Pt, tSide: Side, u: number): Pt {
+  const c1 = control(sSide, s, t), c2 = control(tSide, t, s), v = 1 - u;
+  return {
+    x: v * v * v * s.x + 3 * v * v * u * c1.x + 3 * v * u * u * c2.x + u * u * u * t.x,
+    y: v * v * v * s.y + 3 * v * v * u * c1.y + 3 * v * u * u * c2.y + u * u * u * t.y,
+  };
+}
+
+/** The whole route through `legs`, and the middle of each leg (where the
+ * editor offers to add a waypoint). */
+export function joinLegs(legs: Pt[][]): { pts: Pt[]; mids: Pt[] } {
+  return { pts: simplify(legs.flat()), mids: legs.map((l) => along(l, 0.5)) };
+}
+
+/** An edge's waypoints, or [] when it has none or they aren't usable. */
+export function waypointsOf(raw: Record<string, any> | undefined): Pt[] {
+  const w = raw?.waypoints;
+  if (!Array.isArray(w)) return [];
+  return w.filter((p) => p && Number.isFinite(p.x) && Number.isFinite(p.y)).map((p) => ({ x: p.x, y: p.y }));
 }

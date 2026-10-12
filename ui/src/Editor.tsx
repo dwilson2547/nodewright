@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useImperativeHandle,
+  useMemo,
   useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
@@ -47,7 +48,8 @@ import {
 } from "./canvasMapping";
 import { isSymbol, netName, nodeTypes, ReadOnly, SchemaOps, SelectedNet } from "./nodes";
 import { formatForFile, SAMPLES, SCHEMA_FORMATS, type SchemaFormat } from "./schema";
-import { NetColours, RoutedEdge } from "./edges";
+import { NetColours, RoutedEdge, Waypoints, type WaypointEditor } from "./edges";
+import { waypointsOf, type Pt } from "./routing";
 import { Markers } from "./markers";
 import { canvasFile, TabLinksContext } from "./tablinks";
 import {
@@ -193,6 +195,8 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
   const blocked = useRef(false);
   const noticeTimer = useRef<number | undefined>(undefined);
   const groupDrag = useRef<{ id: string; start: { x: number; y: number }; members: Map<string, { x: number; y: number }> } | null>(null);
+  // Lines whose both ends move with a drag, and their waypoints when it began (design §18).
+  const routeDrag = useRef<{ id: string; start: { x: number; y: number }; edges: Map<string, Pt[]> } | null>(null);
 
   const setStatus = useCallback((s: SaveStatus) => {
     setStatusState(s);
@@ -632,9 +636,13 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
       ids.set(n.id, id);
       return { ...structuredClone(n), id, x: n.x + ox, y: n.y + oy };
     });
-    const edgesRaw = (t.data.edges ?? []).map((e: any) => ({
-      ...structuredClone(e), id: newId(), fromNode: ids.get(e.fromNode), toNode: ids.get(e.toNode),
-    }));
+    const edgesRaw = (t.data.edges ?? []).map((e: any) => {
+      const wps = waypointsOf(e);
+      return {
+        ...structuredClone(e), id: newId(), fromNode: ids.get(e.fromNode), toNode: ids.get(e.toNode),
+        ...(wps.length ? { waypoints: wps.map((p) => ({ x: p.x + ox, y: p.y + oy })) } : {}),
+      };
+    });
     const f = toFlow({ nodes: nodesRaw, edges: edgesRaw });
     const added = f.nodes.map((n) => ({ ...n, selected: true }));
     setNodes((ns) => [
@@ -770,6 +778,14 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
     }));
   }, [setEdges]);
 
+  // Waypoint handles on a selected line (edges.tsx) edit through this.
+  const waypointEditor = useMemo((): WaypointEditor => ({
+    set: (id, wps) => updateEdgeRaw(id, { waypoints: wps.length ? wps : undefined }),
+    snap: (p) => (snap.on
+      ? { x: Math.round(p.x / snap.size) * snap.size, y: Math.round(p.y / snap.size) * snap.size }
+      : { x: Math.round(p.x), y: Math.round(p.y) }),
+  }), [updateEdgeRaw, snap.on, snap.size]);
+
   // An end's fields for a connection: fromSide/toSide, plus fromPort/toPort
   // when it was made to a port (ports.ts). Unset fields are removed.
   const ends = useCallback((c: Connection, base: Record<string, any>) => {
@@ -832,8 +848,24 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
   // JSON Canvas groups don't own their nodes; like Obsidian, dragging a group
   // carries whatever lies inside it when the drag starts.
   const onNodeDragStart = useCallback((_: unknown, node: Node) => {
-    if (node.type !== "group") return;
+    routeDrag.current = null;
+    groupDrag.current = null;
     const all = flow.getNodes();
+    // Waypoints stay put when a node moves, except on lines that move whole:
+    // both ends among the nodes being dragged (or inside a dragged group).
+    const startRoutes = (moving: Set<string>) => {
+      const routed = new Map<string, Pt[]>();
+      for (const e of flow.getEdges()) {
+        const wps = waypointsOf(e.data?.raw);
+        if (wps.length && moving.has(e.source) && moving.has(e.target)) routed.set(e.id, wps);
+      }
+      if (routed.size) routeDrag.current = { id: node.id, start: { ...node.position }, edges: routed };
+    };
+    const moving = new Set([node.id, ...all.filter((n) => n.selected).map((n) => n.id)]);
+    if (node.type !== "group") {
+      startRoutes(moving);
+      return;
+    }
     const g = { x: node.position.x, y: node.position.y, w: node.width ?? 0, h: node.height ?? 0 };
     const members = new Map<string, { x: number; y: number }>();
     for (const n of all) {
@@ -844,9 +876,20 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
       }
     }
     groupDrag.current = { id: node.id, start: { ...node.position }, members };
+    startRoutes(new Set([...moving, ...members.keys()]));
   }, [flow]);
 
   const onNodeDrag = useCallback((_: unknown, node: Node) => {
+    const rd = routeDrag.current;
+    if (rd && rd.id === node.id) {
+      const dx = node.position.x - rd.start.x, dy = node.position.y - rd.start.y;
+      setEdges((es) => es.map((e) => {
+        const was = rd.edges.get(e.id);
+        if (!was) return e;
+        const raw = { ...e.data!.raw, waypoints: was.map((p) => ({ x: Math.round(p.x + dx), y: Math.round(p.y + dy) })) };
+        return { ...e, data: { ...e.data, raw } };
+      }));
+    }
     const gd = groupDrag.current;
     if (!gd || gd.id !== node.id || gd.members.size === 0) return;
     const dx = node.position.x - gd.start.x, dy = node.position.y - gd.start.y;
@@ -854,10 +897,11 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
       const p = gd.members.get(n.id);
       return p ? { ...n, position: { x: p.x + dx, y: p.y + dy } } : n;
     }));
-  }, [setNodes]);
+  }, [setNodes, setEdges]);
 
   const onNodeDragStop = useCallback(() => {
     groupDrag.current = null;
+    routeDrag.current = null;
   }, []);
 
   const onPaneDoubleClick = (e: ReactMouseEvent) => {
@@ -1024,6 +1068,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
     <SchemaOps.Provider value={readOnly ? null : applySchema}>
     <SelectedNet.Provider value={net}>
     <NetColours.Provider value={colorByNet}>
+    <Waypoints.Provider value={readOnly ? null : waypointEditor}>
     <div className={"editor" + (readOnly ? " readonly" : "") + (paletteOpen && !preview ? " with-palette" : "")
       + (historyOpen ? " with-history" : "") + (dropping ? " drop-files" : "")}
       ref={wrapper} onDoubleClick={onPaneDoubleClick} onDragOver={onDragOver} onDragLeave={onDragLeave}
@@ -1182,6 +1227,10 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
                 <button onClick={(e) => onEdgeDoubleClick(e, oneEdge)}>Label…</button>
               </>
             )}
+            {edgeRaws.some((r) => waypointsOf(r).length > 0) && (
+              <button onClick={() => { for (const e of selEdges) waypointEditor.set(e.id, []); }}
+                title="Remove this line's waypoints and route it automatically again">Reset route</button>
+            )}
             {symbolCount + netLabelCount > 0 && (
               <>
                 <span className="sep" />
@@ -1285,6 +1334,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ canvasId
         />
       )}
     </div>
+    </Waypoints.Provider>
     </NetColours.Provider>
     </SelectedNet.Provider>
     </SchemaOps.Provider>
