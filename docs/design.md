@@ -225,13 +225,13 @@ of editor polish.
    tab links and attachments (§3.3). Folders (§11.2) followed in 0.7.0 with Alembic (✅ user
    approved the migration).
 4. **Sharing:** ✅ (0.7.0) read-only share links (§9) and folders (§11.2); ✅ (0.8.0) workspace
-   members (§11.1). Organisations with built-in roles come last in the order below.
+   members (§11.1). Organisations were built and then removed (§19).
 5. **Next, in order** (✅ user, 2026-10-11): ✅ workspace zip export (0.9.0) → ✅ edge corner radius (0.10.0) →
    ✅ node ports (0.11.0) → ✅ icons and built-in set (0.12.0) → ✅ icon creator (0.13.0) →
    ✅ schema nodes (0.14.0) → ✅ versions (0.15.0, §14; ✅ user: per tab, not per schema or per
    workspace) → ✅ schematic symbols, junctions and net labels (0.16.0, §15) → ✅ schematic wiring
    (0.17.0, §16) → ✅ colour by net (0.18.0, §17) → ✅ manual edge waypoints (0.19.0, §18) →
-   ✅ organisations and roles (0.20.0, §19) → ✅ org-shared libraries (0.21.0, §20).
+   organisations (built in 0.20.0-0.21.0, removed in 0.22.0, §19).
 6. **Stretch:** marketplace (§11.5), custom roles.
 
 Full MCP OAuth (§6.2) was pulled forward and shipped as 0.3.0 (✅ user asked for browser sign-in).
@@ -265,14 +265,14 @@ updates, style guides, shapes and line styles, templates, tab links, attachments
 Alembic migrations, CI and the unused-attachment sweep. 0.8.0 added workspace members, 0.9.0 workspace zip
 export, 0.10.0 edge corner radius, 0.11.0 node ports, 0.12.0 icons, 0.13.0 icon creator, 0.14.0
 schema nodes, 0.15.0 versions, 0.16.0 schematic symbols, 0.17.0 schematic wiring, 0.18.0 colour
-by net, 0.19.0 manual edge waypoints, 0.20.0 organisations, 0.21.0 org-shared libraries. Not yet: zip
-import. Live updates are in-process, so the chart must stay at
+by net, 0.19.0 manual edge waypoints; 0.20.0-0.21.0 organisations, removed again in 0.22.0 (§19).
+Not yet: zip import. Live updates are in-process, so the chart must stay at
 one replica until `events.py` moves to Postgres LISTEN/NOTIFY.
 
 ## 11. Future: collaboration and community 📐
 
-User direction 2026-10-11 (✅ user): sharing and collaboration on the same document is the point of
-organisations; fine-grained permissions are a stretch goal that must not be designed out. Folders,
+User direction 2026-10-11 (✅ user): sharing and collaboration on the same document. Organisations
+and fine-grained permissions were later dropped (✅ user, 2026-10-12, §19). Folders,
 a public marketplace for template packs and agent instruction sets, and a server-side lock so
 several people's agents don't fight over one document.
 
@@ -292,9 +292,7 @@ several people's agents don't fight over one document.
     their folder filing of the workspace and releases edit leases they hold in it. The UI's
     **Share** dialog lists people for every role and read-only links for owners only; the header,
     tabs and sidebar hide what a member's role can't do.
-  - Custom roles later: a `roles` table holding an action set per org. Org admins pick built-ins or
-    define their own.
-- **Organisations** ✅ (0.20.0): see §19.
+- **Organisations** and custom roles: not wanted (§19).
 - Schema changes are Alembic migrations (`api/nodewright/migrations/`, 0.7.0). `db.migrate()` runs
   at startup; a database made by the old `create_all` is stamped at the `0001` baseline first.
 
@@ -630,83 +628,12 @@ Not done: agents can't toggle it (no tool sets top-level keys); a legend of nets
 
 Not done: waypoints following their nodes; the "+" can sit on a label at the middle of a leg.
 
-## 19. Organisations ✅ (0.20.0, `orgs.py`, `access.py`, `ui/src/OrgsDialog.tsx`)
+## 19. Organisations: removed (0.22.0)
 
-Decisions (✅ user, 2026-10-12): anyone signed in may create an org; authentik group mapping in this
-release; org-shared libraries (templates, icons, style guide) are the follow-up.
+Built in 0.20.0 (orgs owning workspaces, org access, an authentik group mapping) and 0.21.0
+(org-shared templates, icons and style guides), then removed in 0.22.0 (✅ user, 2026-10-12): too many
+permission layers for a tool used personally and by a few friends, and webdoc, which nodewright will
+integrate with closely, dropped orgs too. Sharing stays as §11.1: personal workspaces, members by
+name (editor/viewer), read-only links. Migration `0009` drops the org schema; `0007`/`0008` stay
+because production ran them. Don't re-propose orgs or more role machinery.
 
-- **Schema** (migration `0007`): `orgs(id, name UNIQUE)`, `org_members(org_id, user_id, role
-  admin|member, source manual|authentik)`, and on `workspaces`: `org_id` (null = personal;
-  `ON DELETE RESTRICT`) and `org_access` (none | viewer | editor, default editor). On an org's
-  workspace `owner_id` only records who last owned it and grants nothing. Users are never deleted,
-  so its `CASCADE` can't remove org workspaces.
-- **Access** (`access.role_on`), the highest of:
-  - owner: a personal workspace's owner, or an admin of the org that owns it;
-  - `org_access` for any member of that org;
-  - the user's own `workspace_members` row. Guests from outside the org are added this way.
-
-  The creator of an org workspace (or whoever moved it in, `owner_id`) may also rename it while
-  they can open it (`access.RENAME`, ✅ user 2026-10-12); nothing else. Deleting, moving and org
-  access stay with admins.
-- **Running an org:**
-  - Admins add existing users by exact username (no invites), change roles and remove people;
-    anyone can leave.
-  - An org always keeps one admin.
-  - It can be deleted only when it owns no workspaces.
-  - Removing someone keeps any workspace they were added to by name. Their edit leases and folder
-    filings go wherever they lost access (`orgs.lost_access`), and the same happens when
-    `org_access` is lowered or a workspace moves.
-- **Moving** (`POST /api/workspaces/{id}/move`, needs `workspace.manage`): into an org the actor is
-  in, or out of one to a member's personal space (`owner`, default the actor). Workspace members
-  keep their rows.
-- **authentik groups:** `ORG_GROUPS` (Helm `orgGroups`) maps a group to an org name and role.
-  - At each sign-in, `orgs.sync_groups` creates a mapped org when first needed, then adds,
-    changes or removes the user's memberships with source `authentik` to match their groups.
-  - Only mapped orgs and authentik-sourced rows are touched: a membership added by hand stays.
-  - Synced rows can't be edited in nodewright (409), and a mapped org can't be renamed.
-  - A missing `groups` claim skips the sync rather than removing anyone.
-  - Changes apply at the next sign-in.
-  - nodewright's provider uses the same profile scope that dxf-converter reads its groups from.
-    ⚠ unverified: that nodewright's ID token carries `groups` in production; no mapping is
-    configured yet.
-- **REST:** `GET/POST /api/orgs`, `PATCH/DELETE /api/orgs/{id}`,
-  `GET/POST /api/orgs/{id}/members`, `PATCH/DELETE /api/orgs/{id}/members/{user}`.
-  `POST /api/workspaces` takes `org_id`; `PATCH` takes `org_access`. Workspaces carry `org`, and
-  `owner` is the org's name for an org's workspace.
-- **MCP:** `list_workspaces` returns `orgs` and each workspace's `org`; `create_workspace` takes
-  `org_id`. Agents can't manage orgs.
-- **UI:**
-  - The **Orgs** header button opens the Organisations dialog.
-  - The sidebar has a heading per org (with "+") under the user's folders, listing that org's
-    workspaces not filed in a folder. Filing never changes a workspace's org.
-  - The Share dialog has an "Everyone in <org>" access row and a Move section.
-
-Not done: custom roles (`access.ROLES` stays the lookup table a per-org
-roles table would replace); a commenter role.
-
-## 20. Org-shared libraries ✅ (0.21.0, `library.py`, `styleguide.py`, `Palette.tsx` ShareControl)
-
-- **Schema** (migration `0008`): `templates.org_id` and `icons.org_id` (null = only the author's;
-  `ON DELETE CASCADE`, so deleting an org deletes what was shared with it), and
-  `org_style_guides(org_id PK, text)`.
-- **Templates and icons** (`library.py`):
-  - Every org member sees and uses an item shared with their org.
-  - Its author (while in the org) and the org's admins rename, edit or delete it.
-  - Only its author shares it into an org they're in, or takes it back. An author who leaves the
-    org leaves it there.
-  - Items can be created straight into an org (`org_id` on `POST /api/templates` and
-    `/api/icons`, and on the `save_template` tool).
-  - Listed items carry `org`, `can_edit` and `mine`.
-  - The per-user limits count what a user authored.
-  - Icon SVGs were already served by id to anyone, so canvases using a shared icon render for
-    everyone.
-- **Style guides:** admins write the org's guide in the Organisations dialog; members read it there.
-  `get_style_guide` returns `org_guides` alongside the user's own guide, limited to the canvas's
-  org when given `canvas_id`. Agents are told to follow the org's guide first and fill in from
-  the user's own.
-- **UI:**
-  - Shared templates and icons show dashed, with the org's name (in the tooltip for icons).
-  - ⇄ on one of your own picks the org to share it with, or "Only me".
-  - Edit and delete buttons show only where `can_edit` is true.
-
-Not done: per-org template or icon limits; a default page set for a whole org.

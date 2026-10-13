@@ -21,7 +21,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.streamable_http_manager import StreamableHTTPASGIApp
 from mcp.server.transport_security import TransportSecuritySettings
 
-from . import (__version__, access, attachments, canvas_format, folders, icons, leases, library, ops, orgs, render, storage,
+from . import (__version__, access, attachments, canvas_format, folders, icons, leases, ops, render, storage,
                styleguide, styles, templates, tokens, versions)
 from .config import Settings
 from .db import Database
@@ -31,8 +31,7 @@ INSTRUCTIONS = """\
 nodewright is a diagram editor; its documents are JSON Canvas files ("canvases"),
 grouped as tabs in workspaces. You are acting for the signed-in user who connected you.
 
-- Call get_style_guide (with the canvas_id) before drawing anything: it says how this user,
-  and the org that owns the canvas, like diagrams.
+- Call get_style_guide before drawing anything: it says how this user likes diagrams.
 - Prefer omitting x/y/width/height: add_elements places and sizes nodes for you, next
   to whatever they connect to. Give nodes your own ids so edges in the same call can
   refer to them. Use `group` to put nodes inside a group node.
@@ -138,17 +137,13 @@ def build(db: Database, settings: Settings, store: storage.Store | None = None,
     @server.tool()
     def list_workspaces(ctx: Context) -> dict:
         """Workspaces you can see, each with its canvases (tabs): ids, names,
-        revisions and node/edge counts, your role (owner, editor, viewer) and
-        the org that owns it (null = the user's or someone's personal
-        workspace); plus the user's folders (folder_id null = top level) and
-        the orgs they're in."""
+        revisions and node/edge counts, and your role (owner, editor, viewer);
+        plus the user's folders (folder_id null = top level)."""
         def go(s, user, who):
             filed = folders.placements(s, user)
             return {"folders": [folders.out(f) for f in folders.all_for(s, user)],
-                    "orgs": [{"id": o.id, "name": o.name, "role": r} for o, r in orgs.mine(s, user)],
                     "workspaces": [{"id": ws.id, "name": ws.name, "folder_id": filed.get(ws.id),
                                     "role": access.role_on(s, user, ws),
-                                    "org": {"id": ws.org.id, "name": ws.org.name} if ws.org else None,
                                     "canvases": [ops.summary(c) for c in ws.canvases]}
                                    for ws in access.visible_workspaces(s, user)]}
         return run(ctx, go)
@@ -169,17 +164,12 @@ def build(db: Database, settings: Settings, store: storage.Store | None = None,
 
     @server.tool()
     def create_workspace(ctx: Context, name: Annotated[str, Field(min_length=1, max_length=200)],
-                         folder_id: str | None = None,
-                         org_id: Annotated[str | None, Field(
-                             description="An org from list_workspaces to own it; omit for the "
-                                         "user's personal space.")] = None) -> dict:
-        """Create a workspace with one empty canvas, optionally in a folder or owned by an org."""
+                         folder_id: str | None = None) -> dict:
+        """Create a workspace with one empty canvas, optionally in a folder."""
         def go(s, user, who):
             if folder_id:
                 folders.get(s, user, folder_id)
-            if org_id and not access.org_role(s, user, org_id):
-                raise ToolError("org not found")
-            ws = Workspace(owner_id=user.id, name=name.strip(), org_id=org_id or None)
+            ws = Workspace(owner_id=user.id, name=name.strip())
             s.add(ws)
             s.flush()
             if folder_id:
@@ -369,9 +359,7 @@ def build(db: Database, settings: Settings, store: storage.Store | None = None,
         def go(s, user, who):
             brief = lambda i: {k: i[k] for k in ("id", "name", "file", "ports")}  # noqa: E731
             every = icons.builtins().values()
-            names = library.org_names(s, user)
-            return {"mine": [{**brief(icons.out(i)), **({"org": names.get(i.org_id)} if i.org_id else {})}
-                             for i in icons.mine(s, user)],
+            return {"mine": [brief(icons.out(i)) for i in icons.mine(s, user)],
                     "builtin": [brief(icons.out(b)) for b in every if not icons.is_symbol(b["id"])],
                     "symbols": [brief(icons.out(b)) | {"category": b["category"]}
                                 for b in every if icons.is_symbol(b["id"])]}
@@ -380,20 +368,16 @@ def build(db: Database, settings: Settings, store: storage.Store | None = None,
     @server.tool()
     def list_templates(ctx: Context) -> dict:
         """Templates you can use: stencil (one styled node), fragment (a few
-        connected nodes) and page (a whole starting canvas). The user's own and
-        their orgs' shared ones (`org` names the org) come first. Returns ids,
-        names, kinds and node counts; pass an id to apply_template or
-        create_canvas. In an org's workspace, prefer that org's templates."""
+        connected nodes) and page (a whole starting canvas). The user's own come
+        first. Returns ids, names, kinds and node counts; pass an id to
+        apply_template or create_canvas."""
         def go(s, user, who):
-            names = library.org_names(s, user)
-
-            def brief(t, org_id=None):
+            def brief(t):
                 d = t["data"]
                 return {"id": t["id"], "name": t["name"], "kind": t["kind"],
                         "builtin": t["builtin"], "nodes": len(d["nodes"]),
-                        "texts": [n.get("text") or n.get("label") for n in d["nodes"]][:6],
-                        **({"org": names.get(org_id)} if org_id else {})}
-            mine = [brief(templates.out(t), t.org_id) for t in templates.mine(s, user)]
+                        "texts": [n.get("text") or n.get("label") for n in d["nodes"]][:6]}
+            mine = [brief(templates.out(t)) for t in templates.mine(s, user)]
             return {"templates": mine + [brief(t) for t in templates.BUILTIN.values()],
                     "default_page": templates.default_page_id(s, user)}
         return run(ctx, go)
@@ -416,17 +400,14 @@ def build(db: Database, settings: Settings, store: storage.Store | None = None,
     @server.tool()
     def save_template(ctx: Context, canvas_id: str, node_ids: list[str],
                       name: Annotated[str, Field(min_length=1, max_length=200)],
-                      kind: Literal["stencil", "fragment", "page"] = "fragment",
-                      org_id: Annotated[str | None, Field(
-                          description="Share it with this org (list_workspaces lists the user's "
-                                      "orgs) instead of keeping it to the user.")] = None) -> dict:
+                      kind: Literal["stencil", "fragment", "page"] = "fragment") -> dict:
         """Save nodes from a canvas (with the contents of any chosen group, and
         the edges between them) as one of the user's templates. Ask the user
-        before saving templates they didn't ask for, and before sharing one with an org."""
+        before saving templates they didn't ask for."""
         def go(s, user, who):
             c = access.canvas(s, user, canvas_id)
             try:
-                t = templates.create(s, user, name, kind, ops.extract(c.data, node_ids), org_id)
+                t = templates.create(s, user, name, kind, ops.extract(c.data, node_ids))
             except templates.TemplateError as exc:
                 raise ToolError(str(exc)) from None
             return {"template_id": t.id, "kind": t.kind, "nodes": len(t.data["nodes"])}
@@ -484,15 +465,11 @@ def build(db: Database, settings: Settings, store: storage.Store | None = None,
         return run(ctx, go)
 
     @server.tool()
-    def get_style_guide(ctx: Context, canvas_id: Annotated[str | None, Field(
-            description="The canvas you're about to draw on: limits org_guides to the org "
-                        "that owns its workspace (none for a personal workspace).")] = None) -> dict:
-        """How this user likes their diagrams, plus `org_guides`: the style
-        guides of their orgs. Read it before drawing. On an org's canvas,
-        follow that org's guide; the user's own fills in what it doesn't cover."""
+    def get_style_guide(ctx: Context) -> dict:
+        """How this user likes their diagrams. Read it before drawing."""
         def go(s, user, who):
-            ws = access.canvas(s, user, canvas_id).workspace if canvas_id else None
-            return styleguide.for_agent(s, user, [o for o, _ in orgs.mine(s, user)], ws)
+            text, default = styleguide.get(s, user)
+            return {"style_guide": text, "is_default": default}
         return run(ctx, go)
 
     host = settings.public_url.split("://", 1)[-1].split("/", 1)[0]

@@ -1,11 +1,10 @@
-"""Diagram style guides handed to agents: the user's own (design §11.4) and
-their orgs' (design §20), which admins write."""
+"""Per-user diagram style guide handed to agents (design §11.4)."""
 
 from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
-from .models import Org, OrgStyleGuide, StyleGuide, User, Workspace, utcnow
+from .models import StyleGuide, User
 
 MAX_CHARS = 20_000
 
@@ -30,32 +29,3 @@ DEFAULT = """\
 def get(s: Session, user: User) -> tuple[str, bool]:
     row = s.get(StyleGuide, user.id)
     return (row.text, False) if row is not None else (DEFAULT, True)
-
-
-def org_get(s: Session, org_id: str) -> str:
-    row = s.get(OrgStyleGuide, org_id)
-    return row.text if row is not None else ""
-
-
-def org_put(s: Session, org_id: str, text: str) -> str:
-    """Empty text removes the org's guide."""
-    row = s.get(OrgStyleGuide, org_id)
-    if not text.strip():
-        if row is not None:
-            s.delete(row)
-        return ""
-    if row is None:
-        s.add(OrgStyleGuide(org_id=org_id, text=text))
-    else:
-        row.text, row.updated_at = text, utcnow()
-    return text
-
-
-def for_agent(s: Session, user: User, orgs: list[Org], ws: Workspace | None) -> dict:
-    """What get_style_guide returns: the user's guide plus org guides, only
-    that workspace's org when one is given."""
-    text, default = get(s, user)
-    if ws is not None:
-        orgs = [o for o in orgs if o.id == ws.org_id]
-    guides = [{"org": o.name, "text": t} for o in orgs if (t := org_get(s, o.id))]
-    return {"style_guide": text, "is_default": default, "org_guides": guides}

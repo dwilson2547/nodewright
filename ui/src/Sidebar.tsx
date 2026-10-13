@@ -1,14 +1,11 @@
 // Workspaces, organised in the user's folders (design §11.2). Drag a workspace
 // or folder onto a folder to file it there, or onto empty space for the top level.
-// Below the folders, a heading per organisation (design §19) lists its
-// workspaces that aren't in one of your folders; filing never moves a
-// workspace between orgs (that's Share → Move).
 import { useEffect, useState, type DragEvent } from "react";
-import type { Folder, Org, Workspace } from "./api";
+import type { Folder, Workspace } from "./api";
 
 export type SidebarActions = {
   open: (wsId: string) => void;
-  newWorkspace: (folderId: string | null, orgId?: string) => void;
+  newWorkspace: (folderId: string | null) => void;
   newFolder: (parentId: string | null) => void;
   renameFolder: (f: Folder) => void;
   deleteFolder: (f: Folder) => void;
@@ -39,11 +36,9 @@ function useExpanded() {
   return [open, toggle] as const;
 }
 
-export function Sidebar({ folders, workspaces, orgs, current, act }: {
+export function Sidebar({ folders, workspaces, current, act }: {
   folders: Folder[];
   workspaces: Workspace[];
-  /** Orgs you're in; orgs you only reach as a guest show up from their workspaces. */
-  orgs: Org[];
   current: string | null;
   act: SidebarActions;
 }) {
@@ -52,14 +47,8 @@ export function Sidebar({ folders, workspaces, orgs, current, act }: {
   const [menu, setMenu] = useState<string | null>(null);
   const known = new Set(folders.map((f) => f.id));
   const kids = (parent: string | null) => folders.filter((f) => (f.parent_id ?? null) === parent);
-  const folderOf = (w: Workspace) => (w.folder_id && known.has(w.folder_id) ? w.folder_id : null);
-  // Unfiled org workspaces go under their org's heading, not the top level.
   const filed = (folder: string | null) => workspaces.filter((w) =>
-    folderOf(w) === folder && (folder !== null || !w.org));
-  const orgList = orgs.map((o) => ({ id: o.id, name: o.name, mine: true }));
-  for (const w of workspaces) {
-    if (w.org && !orgList.some((o) => o.id === w.org!.id)) orgList.push({ id: w.org.id, name: w.org.name, mine: false });
-  }
+    (w.folder_id && known.has(w.folder_id) ? w.folder_id : null) === folder);
 
   // Open the folders on the way to the current workspace.
   useEffect(() => {
@@ -110,12 +99,10 @@ export function Sidebar({ folders, workspaces, orgs, current, act }: {
   const wsRow = (w: Workspace, depth: number) => (
     <div key={w.id} className={"sb-row sb-ws" + (w.id === current ? " active" : "")}
       style={{ paddingLeft: 10 + depth * 14 }} onClick={() => act.open(w.id)}
-      title={w.org ? `${w.name} — ${w.org.name} (${w.role})`
-        : w.role === "owner" ? w.name : `${w.name} — shared by ${w.owner} (${w.role})`}
+      title={w.role === "owner" ? w.name : `${w.name} — shared by ${w.owner} (${w.role})`}
       {...dragging({ kind: "ws", id: w.id })}>
       <span className="sb-name">{w.name}</span>
-      {w.org && folderOf(w) && <span className="sb-org">{w.org.name}</span>}
-      {!w.org && w.role !== "owner" && <span className="sb-shared" aria-label="shared with you">⇄</span>}
+      {w.role !== "owner" && <span className="sb-shared" aria-label="shared with you">⇄</span>}
     </div>
   );
 
@@ -164,27 +151,6 @@ export function Sidebar({ folders, workspaces, orgs, current, act }: {
       <div className="sb-list">
         {kids(null).map((f) => folderTree(f, 0))}
         {filed(null).map((w) => wsRow(w, 0))}
-        {orgList.map((o) => {
-          const rows = workspaces.filter((w) => w.org?.id === o.id && folderOf(w) === null);
-          const isOpen = !open.has("org-closed:" + o.id);
-          return (
-            <div key={o.id} className="sb-orgsec">
-              <div className="sb-row sb-orghead" onClick={() => toggle("org-closed:" + o.id)}
-                title={o.mine ? o.name : `${o.name}: you have access to some of its workspaces`} {...dropZone(null)}>
-                <span className="sb-caret">{isOpen ? "▾" : "▸"}</span>
-                <span className="sb-name">{o.name}</span>
-                {o.mine && (
-                  <button className="sb-btn" title={`New workspace in ${o.name}`}
-                    onClick={(e) => { e.stopPropagation(); act.newWorkspace(null, o.id); }}>+</button>
-                )}
-              </div>
-              {isOpen && rows.map((w) => wsRow(w, 1))}
-              {isOpen && !rows.length && (
-                <div className="sb-row muted sb-empty" style={{ paddingLeft: 24 }}>None outside your folders</div>
-              )}
-            </div>
-          );
-        })}
       </div>
     </aside>
   );

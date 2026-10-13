@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 
 from .config import Settings
 from .models import User, UserIdentity
-from . import auth, orgs
+from . import auth
 
 log = logging.getLogger("nodewright.oidc")
 
@@ -115,7 +115,7 @@ def finish(provider: Provider, settings: Settings, flow_cookie: str, code: str,
     return provider.verify(tokens.get("id_token") or "", nonce)
 
 
-def resolve_user(s: Session, claims: dict, settings: Settings | None = None) -> User:
+def resolve_user(s: Session, claims: dict) -> User:
     issuer, subject = claims["iss"], claims["sub"]
     user = s.scalar(select(User).join(UserIdentity).where(
         UserIdentity.issuer == issuer, UserIdentity.subject == subject))
@@ -125,12 +125,4 @@ def resolve_user(s: Session, claims: dict, settings: Settings | None = None) -> 
         user = auth.create_user(s, wanted)
         s.add(UserIdentity(user_id=user.id, issuer=issuer, subject=subject))
         log.warning("oidc: created user %s", user.username)
-    if settings is not None and settings.org_groups:
-        groups = claims.get("groups")
-        if isinstance(groups, list):
-            orgs.sync_groups(s, user, [str(g) for g in groups], settings.org_groups)
-        else:
-            # No claim at all is a provider setup problem, not "in no groups":
-            # leave synced memberships as they are rather than dropping them.
-            log.warning("oidc: no groups claim for %s; org memberships not synced", user.username)
     return user

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type DragEvent } from "react";
-import { api, type Icon, type JsonCanvas, type LibraryInfo, type Org, type Template, type TemplateKind } from "./api";
+import { api, type Icon, type JsonCanvas, type Template, type TemplateKind } from "./api";
 import { IconCreator } from "./IconCreator";
 import { ICON_DRAG_TYPE } from "./icons";
 import { DEFAULT_COLOR, resolveColor } from "./canvasMapping";
@@ -12,31 +12,6 @@ const SECTIONS: [TemplateKind, string][] = [
   ["fragment", "Snippets"],
   ["page", "Pages"],
 ];
-
-/** Share one of your templates or icons with an org, or take it back (design §20). */
-function ShareControl({ item, orgs, onPick }: {
-  item: LibraryInfo;
-  orgs: Org[];
-  onPick: (orgId: string | null) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  if (!item.mine || (!orgs.length && !item.org)) return null;
-  if (!open) {
-    return (
-      <button className="tab-x" title={item.org ? `Shared with ${item.org.name}: change` : "Share with an organisation"}
-        onClick={() => setOpen(true)}>⇄</button>
-    );
-  }
-  return (
-    <select className="palette-share" autoFocus value={item.org?.id ?? ""} aria-label="Share with"
-      onBlur={() => setOpen(false)}
-      onChange={(e) => { setOpen(false); onPick(e.target.value || null); }}>
-      <option value="">Only me</option>
-      {orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-      {item.org && !orgs.some((o) => o.id === item.org!.id) && <option value={item.org.id}>{item.org.name}</option>}
-    </select>
-  );
-}
 
 /** A small drawing of a template: outlines and straight edges. */
 function Thumb({ doc }: { doc: JsonCanvas }) {
@@ -72,9 +47,8 @@ function Thumb({ doc }: { doc: JsonCanvas }) {
 
 // Icons (design §13.2): built-ins and the user's own; click to add an icon
 // node (or set the icon of the selected text node), drag to place one.
-function Icons({ editable, orgs, onIcon, fail }: {
+function Icons({ editable, onIcon, fail }: {
   editable: boolean;
-  orgs: Org[];
   onIcon: (icon: Icon) => void;
   fail: (e: unknown) => void;
 }) {
@@ -99,12 +73,8 @@ function Icons({ editable, orgs, onIcon, fail }: {
     }
   };
   const remove = async (i: Icon) => {
-    const shared = i.org ? ` It's shared with ${i.org.name}, so it goes for everyone there.` : "";
-    if (!confirm(`Delete the icon "${i.name}"? Nodes using it will show "missing icon".${shared}`)) return;
+    if (!confirm(`Delete the icon "${i.name}"? Nodes using it will show "missing icon".`)) return;
     await api.deleteIcon(i.id).then(load, fail);
-  };
-  const share = async (i: Icon, orgId: string | null) => {
-    await api.patchIcon(i.id, { org_id: orgId }).then(load, fail);
   };
   const drag = (i: Icon) => (e: DragEvent) => {
     e.dataTransfer.setData(ICON_DRAG_TYPE, JSON.stringify(i));
@@ -120,17 +90,15 @@ function Icons({ editable, orgs, onIcon, fail }: {
         onChange={(e) => setQ(e.target.value)} aria-label="Search icons" />
       <div className="palette-icons">
         {all.map((i) => (
-          <div key={i.id} className={"palette-icon" + (i.builtin ? "" : " mine") + (i.org ? " org" : "")}>
+          <div key={i.id} className={"palette-icon" + (i.builtin ? "" : " mine")}>
             <button className="palette-insert" draggable={editable} disabled={!editable} onDragStart={drag(i)}
-              onClick={() => onIcon(i)}
-              title={(i.org ? `${i.name} (${i.org.name})` : i.name) + (editable ? ": click to add (or put on the selected text box), or drag" : "")}>
+              onClick={() => onIcon(i)} title={editable ? `${i.name}: click to add (or put on the selected text box), or drag` : i.name}>
               {i.tinted
                 ? <span className="glyph" style={{ mask: `url("${i.url}?v=${bust}") center / contain no-repeat`, WebkitMask: `url("${i.url}?v=${bust}") center / contain no-repeat` }} />
                 : <img className="glyph" src={`${i.url}?v=${bust}`} alt="" />}
             </button>
-            {i.can_edit && <button className="tab-x" title="Delete icon" onClick={() => void remove(i)}>×</button>}
-            {i.editable && i.can_edit && editable && <button className="tab-x edit" title="Edit in the icon creator" onClick={() => setCreating(i)}>✎</button>}
-            <span className="palette-icon-share"><ShareControl item={i} orgs={orgs} onPick={(o) => void share(i, o)} /></span>
+            {!i.builtin && <button className="tab-x" title="Delete icon" onClick={() => void remove(i)}>×</button>}
+            {i.editable && editable && <button className="tab-x edit" title="Edit in the icon creator" onClick={() => setCreating(i)}>✎</button>}
           </div>
         ))}
       </div>
@@ -209,7 +177,6 @@ type Props = {
 export function Palette({ editable, reloadKey, onInsert, onIcon, onNetLabel, onSavePage, onClose }: Props) {
   const [list, setList] = useState<Template[]>([]);
   const [defaultPage, setDefaultPage] = useState("");
-  const [orgs, setOrgs] = useState<Org[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const fail = useCallback((e: unknown) => setError(e instanceof Error ? e.message : String(e)), []);
@@ -221,7 +188,6 @@ export function Palette({ editable, reloadKey, onInsert, onIcon, onNetLabel, onS
     }, (e) => setError(String(e.message || e)));
   }, []);
   useEffect(load, [load, reloadKey]);
-  useEffect(() => { api.orgs().then((r) => setOrgs(r.orgs), () => undefined); }, [reloadKey]);
 
   const drag = (t: Template) => (e: DragEvent) => {
     e.dataTransfer.setData(DRAG_TYPE, t.id);
@@ -229,8 +195,7 @@ export function Palette({ editable, reloadKey, onInsert, onIcon, onNetLabel, onS
   };
 
   const remove = async (t: Template) => {
-    const shared = t.org ? ` It's shared with ${t.org.name}, so it goes for everyone there.` : "";
-    if (!confirm(`Delete the template "${t.name}"?${shared}`)) return;
+    if (!confirm(`Delete the template "${t.name}"?`)) return;
     await api.deleteTemplate(t.id).catch((e) => setError(String(e.message || e)));
     load();
   };
@@ -239,11 +204,6 @@ export function Palette({ editable, reloadKey, onInsert, onIcon, onNetLabel, onS
     const name = prompt("Template name", t.name)?.trim();
     if (!name || name === t.name) return;
     await api.renameTemplate(t.id, name).catch((e) => setError(String(e.message || e)));
-    load();
-  };
-
-  const share = async (t: Template, orgId: string | null) => {
-    await api.shareTemplate(t.id, orgId).catch((e) => setError(String(e.message || e)));
     load();
   };
 
@@ -278,7 +238,7 @@ export function Palette({ editable, reloadKey, onInsert, onIcon, onNetLabel, onS
             <h5>{title}</h5>
             <div className={"palette-grid" + (kind === "stencil" ? "" : " wide")}>
               {items.map((t) => (
-                <div key={t.id} className={"palette-item" + (t.builtin ? "" : " mine") + (t.org ? " org" : "")}>
+                <div key={t.id} className={"palette-item" + (t.builtin ? "" : " mine")}>
                   <button
                     className="palette-insert"
                     draggable={editable}
@@ -289,7 +249,6 @@ export function Palette({ editable, reloadKey, onInsert, onIcon, onNetLabel, onS
                   >
                     <Thumb doc={t.data} />
                     <span>{t.name}</span>
-                    {t.org && <span className="palette-org">{t.org.name}</span>}
                   </button>
                   <div className="palette-actions">
                     {kind === "page" && (
@@ -297,11 +256,10 @@ export function Palette({ editable, reloadKey, onInsert, onIcon, onNetLabel, onS
                         title={defaultPage === t.id ? "New tabs start from this page" : "Start new tabs from this page"}
                         onClick={() => void makeDefault(t)}>{defaultPage === t.id ? "★" : "☆"}</button>
                     )}
-                    {t.can_edit && <>
+                    {!t.builtin && <>
                       <button className="tab-x" title="Rename" onClick={() => void rename(t)}>✎</button>
                       <button className="tab-x" title="Delete" onClick={() => void remove(t)}>×</button>
                     </>}
-                    <ShareControl item={t} orgs={orgs} onPick={(o) => void share(t, o)} />
                   </div>
                 </div>
               ))}
@@ -311,11 +269,8 @@ export function Palette({ editable, reloadKey, onInsert, onIcon, onNetLabel, onS
         );
       })}
       <Symbols editable={editable} onIcon={onIcon} onNetLabel={onNetLabel} fail={fail} />
-      <Icons editable={editable} orgs={orgs} onIcon={onIcon} fail={fail} />
-      <p className="muted small">
-        Select nodes and use <em>Save as template</em> to add your own shapes and snippets.
-        {orgs.length > 0 && <> Use ⇄ on one of yours to share it with an organisation.</>}
-      </p>
+      <Icons editable={editable} onIcon={onIcon} fail={fail} />
+      <p className="muted small">Select nodes and use <em>Save as template</em> to add your own shapes and snippets.</p>
     </aside>
   );
 }

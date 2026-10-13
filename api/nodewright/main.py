@@ -24,11 +24,11 @@ from pydantic import AnyHttpUrl, BaseModel, ConfigDict
 from starlette.routing import Route
 
 from . import (__version__, access, attachments, auth, bundle, canvas_format, events, folders,
-               icons, leases, library, members, orgs, schemas, versions, mcp_server, oauth, oidc, render, shares, storage, styleguide,
+               icons, leases, members, schemas, versions, mcp_server, oauth, oidc, render, shares, storage, styleguide,
                svgsafe, templates, tokens)
 from .config import Settings
 from .db import Database
-from .models import (AccessToken, Attachment, Canvas, CanvasRevision, Icon, OAuthGrant, OrgMember, ShareLink, StyleGuide,
+from .models import (AccessToken, Attachment, Canvas, CanvasRevision, OAuthGrant, ShareLink, StyleGuide,
                      Template, User, Workspace, utcnow)
 
 log = logging.getLogger("nodewright")
@@ -75,7 +75,6 @@ class IconIn(BaseModel):
     tinted: bool = True
     ports: list[dict] = []
     source: dict | None = None
-    org_id: str | None = Field(default=None, max_length=32)
 
 
 class SchemaIn(BaseModel):
@@ -89,35 +88,10 @@ class IconPatch(BaseModel):
     tinted: bool | None = None
     ports: list[dict] | None = None
     source: dict | None = None
-    org_id: str | None = Field(default=None, max_length=32)
-    """Share with this org, or null to take it back (its author only; library.py)."""
 
 
 class RoleIn(BaseModel):
     role: str = Field(max_length=32)
-
-
-class DevLoginIn(BaseModel):
-    name: str = Field(min_length=1, max_length=200)
-    groups: list[str] | None = None
-    """Pretend authentik sent these groups (ORG_GROUPS sync), for local testing."""
-
-
-class WorkspaceIn(BaseModel):
-    name: str = Field(min_length=1, max_length=200)
-    org_id: str | None = Field(default=None, max_length=32)
-
-
-class WorkspacePatch(BaseModel):
-    name: str | None = Field(default=None, min_length=1, max_length=200)
-    org_access: str | None = Field(default=None, max_length=16)
-
-
-class MoveIn(BaseModel):
-    org_id: str | None = Field(default=None, max_length=32)
-    """Move into this org, or null to make it personal again..."""
-    owner: str | None = Field(default=None, max_length=64)
-    """...owned by this org member (default: you)."""
 
 
 class ShareIn(BaseModel):
@@ -134,13 +108,6 @@ class TemplateIn(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     kind: str = Field(pattern="^(stencil|fragment|page)$")
     data: dict
-    org_id: str | None = Field(default=None, max_length=32)
-
-
-class TemplatePatch(BaseModel):
-    name: str | None = Field(default=None, min_length=1, max_length=200)
-    org_id: str | None = Field(default=None, max_length=32)
-    """Share with this org, or null to take it back (its author only; library.py)."""
 
 
 class DefaultPageIn(BaseModel):
@@ -160,12 +127,9 @@ def _iso(dt: datetime) -> str:
     return dt.isoformat()
 
 
-def _ws_out(ws: Workspace, role: str = "owner", can_rename: bool | None = None) -> dict:
-    org = ws.org
+def _ws_out(ws: Workspace, role: str = "owner") -> dict:
     return {"id": ws.id, "name": ws.name, "updated_at": _iso(ws.updated_at), "role": role,
-            "can_rename": role == "owner" if can_rename is None else can_rename,
-            "owner": org.name if org else ws.owner.username,
-            "org": {"id": org.id, "name": org.name, "access": ws.org_access} if org else None}
+            "owner": ws.owner.username}
 
 
 def _canvas_meta(c: Canvas) -> dict:
@@ -350,7 +314,7 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
         try:
             claims = oidc.finish(provider, settings, request.cookies.get(oidc.FLOW_COOKIE, ""),
                                  code, state)
-            user = oidc.resolve_user(s, claims, settings)
+            user = oidc.resolve_user(s, claims)
             auth.start_session(s, user, settings, res)
         except oidc.SignInRefused:
             return RedirectResponse("/?signin_error=refused", 302)
@@ -361,14 +325,12 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
 
     if settings.dev_login_enabled:
         @app.post("/api/auth/dev-login")
-        def dev_login(body: DevLoginIn, request: Request, response: Response,
+        def dev_login(body: NameIn, request: Request, response: Response,
                       s: Session = Depends(session)):
             if request.headers.get(auth.CSRF_HEADER) != "1":
                 raise HTTPException(403, "missing X-Nodewright header")
             name = auth.USERNAME_RE.sub("", body.name.lower())[:60] or "dev"
             user = s.scalar(select(User).where(User.username == name)) or auth.create_user(s, name)
-            if body.groups is not None:
-                orgs.sync_groups(s, user, body.groups, settings.org_groups)
             auth.start_session(s, user, settings, response)
             return {"id": user.id, "username": user.username}
 
@@ -377,8 +339,7 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
     @app.get("/api/workspaces")
     def list_workspaces(user: User = Depends(user_dep), s: Session = Depends(session)):
         filed = folders.placements(s, user)
-        return [{**_ws_out(w, access.role_on(s, user, w), access.can(s, user, w, access.RENAME)),
-                 "folder_id": filed.get(w.id)}
+        return [{**_ws_out(w, access.role_on(s, user, w)), "folder_id": filed.get(w.id)}
                 for w in access.visible_workspaces(s, user)]
 
     @app.put("/api/workspaces/{ws_id}/folder")
@@ -429,139 +390,21 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
         return Response(status_code=204)
 
     @app.post("/api/workspaces", status_code=201)
-    def create_workspace(body: WorkspaceIn, user: User = Depends(user_dep),
+    def create_workspace(body: NameIn, user: User = Depends(user_dep),
                          s: Session = Depends(session)):
-        if body.org_id is not None and not access.org_role(s, user, body.org_id):
-            raise HTTPException(404, "org not found")
-        ws = Workspace(owner_id=user.id, name=body.name.strip(), org_id=body.org_id)
+        ws = Workspace(owner_id=user.id, name=body.name.strip())
         s.add(ws)
         s.flush()
         s.add(Canvas(workspace_id=ws.id, name="Untitled", position=0, revision=1,
                      data=templates.page_data(s, user, None)))
-        s.refresh(ws)
-        return _ws_out(ws, access.role_on(s, user, ws), access.can(s, user, ws, access.RENAME))
+        return _ws_out(ws)
 
     @app.patch("/api/workspaces/{ws_id}")
-    def patch_workspace(ws_id: str, body: WorkspacePatch, user: User = Depends(user_dep),
-                        s: Session = Depends(session)):
-        ws = workspace_for(s, user, ws_id,
-                           access.MANAGE if body.org_access is not None else access.RENAME)
-        if body.name is not None:
-            ws.name, ws.updated_at = body.name.strip(), utcnow()
-        if body.org_access is not None:
-            try:
-                orgs.set_access(ws, body.org_access)
-            except orgs.OrgError as exc:
-                raise HTTPException(exc.status, str(exc)) from None
-            s.flush()
-            for (uid,) in s.execute(select(OrgMember.user_id).where(OrgMember.org_id == ws.org_id)).all():
-                orgs.lost_access(s, s.get(User, uid), ws.org_id)
-        return _ws_out(ws, access.role_on(s, user, ws), access.can(s, user, ws, access.RENAME))
-
-    @app.post("/api/workspaces/{ws_id}/move")
-    def move_workspace(ws_id: str, body: MoveIn, user: User = Depends(user_dep),
-                       s: Session = Depends(session)):
+    def rename_workspace(ws_id: str, body: NameIn, user: User = Depends(user_dep),
+                         s: Session = Depends(session)):
         ws = workspace_for(s, user, ws_id, access.MANAGE)
-        try:
-            orgs.move(s, user, ws, body.org_id, body.owner)
-        except orgs.OrgError as exc:
-            raise HTTPException(exc.status, str(exc)) from None
-        s.refresh(ws)
-        role = access.role_on(s, user, ws)
-        return {**_ws_out(ws, role or "none", access.can(s, user, ws, access.RENAME)),
-                "can_see": role is not None}
-
-    # --- organisations (orgs.py) ------------------------------------------------
-
-    managed_orgs = {name for name, _ in settings.org_groups.values()}
-
-    def org_error(exc: orgs.OrgError) -> HTTPException:
-        return HTTPException(exc.status, str(exc))
-
-    @app.get("/api/orgs")
-    def list_orgs(user: User = Depends(user_dep), s: Session = Depends(session)):
-        return {"orgs": [orgs.out(o, r, managed_orgs) for o, r in orgs.mine(s, user)]}
-
-    @app.post("/api/orgs", status_code=201)
-    def create_org(body: NameIn, user: User = Depends(user_dep), s: Session = Depends(session)):
-        try:
-            return orgs.out(orgs.create(s, user, body.name), "admin", managed_orgs)
-        except orgs.OrgError as exc:
-            raise org_error(exc) from None
-
-    @app.patch("/api/orgs/{org_id}")
-    def rename_org(org_id: str, body: NameIn, user: User = Depends(user_dep),
-                   s: Session = Depends(session)):
-        try:
-            org, role = orgs.get(s, user, org_id, admin=True)
-            orgs.rename(s, org, body.name, managed_orgs)
-        except orgs.OrgError as exc:
-            raise org_error(exc) from None
-        return orgs.out(org, role, managed_orgs)
-
-    @app.delete("/api/orgs/{org_id}", status_code=204)
-    def delete_org(org_id: str, user: User = Depends(user_dep), s: Session = Depends(session)):
-        try:
-            org, _ = orgs.get(s, user, org_id, admin=True)
-            orgs.remove_org(s, org)
-        except orgs.OrgError as exc:
-            raise org_error(exc) from None
-        return Response(status_code=204)
-
-    @app.get("/api/orgs/{org_id}/members")
-    def list_org_members(org_id: str, user: User = Depends(user_dep), s: Session = Depends(session)):
-        try:
-            org, role = orgs.get(s, user, org_id)
-        except orgs.OrgError as exc:
-            raise org_error(exc) from None
-        return {"members": orgs.listing(s, org), "roles": list(access.ORG_ROLES),
-                "can_manage": role == "admin"}
-
-    @app.post("/api/orgs/{org_id}/members", status_code=201)
-    def add_org_member(org_id: str, body: MemberIn, user: User = Depends(user_dep),
-                       s: Session = Depends(session)):
-        try:
-            org, _ = orgs.get(s, user, org_id, admin=True)
-            return orgs.add(s, org, body.username, body.role)
-        except orgs.OrgError as exc:
-            raise org_error(exc) from None
-
-    @app.patch("/api/orgs/{org_id}/members/{user_id}")
-    def set_org_role(org_id: str, user_id: str, body: RoleIn, user: User = Depends(user_dep),
-                     s: Session = Depends(session)):
-        try:
-            org, _ = orgs.get(s, user, org_id, admin=True)
-            return orgs.set_role(s, org, user_id, body.role)
-        except orgs.OrgError as exc:
-            raise org_error(exc) from None
-
-    @app.delete("/api/orgs/{org_id}/members/{user_id}", status_code=204)
-    def remove_org_member(org_id: str, user_id: str, user: User = Depends(user_dep),
-                          s: Session = Depends(session)):
-        # Admins remove anyone; everyone else only themselves (leave).
-        try:
-            org, _ = orgs.get(s, user, org_id, admin=user_id != user.id)
-            orgs.remove(s, org, user_id)
-        except orgs.OrgError as exc:
-            raise org_error(exc) from None
-        return Response(status_code=204)
-
-    @app.get("/api/orgs/{org_id}/style-guide")
-    def get_org_style_guide(org_id: str, user: User = Depends(user_dep), s: Session = Depends(session)):
-        try:
-            _, role = orgs.get(s, user, org_id)
-        except orgs.OrgError as exc:
-            raise org_error(exc) from None
-        return {"text": styleguide.org_get(s, org_id), "can_edit": role == "admin"}
-
-    @app.put("/api/orgs/{org_id}/style-guide")
-    def put_org_style_guide(org_id: str, body: StyleGuideIn, user: User = Depends(user_dep),
-                            s: Session = Depends(session)):
-        try:
-            orgs.get(s, user, org_id, admin=True)
-        except orgs.OrgError as exc:
-            raise org_error(exc) from None
-        return {"text": styleguide.org_put(s, org_id, body.text), "can_edit": True}
+        ws.name, ws.updated_at = body.name.strip(), utcnow()
+        return _ws_out(ws)
 
     @app.delete("/api/workspaces/{ws_id}", status_code=204)
     def delete_workspace(ws_id: str, tasks: BackgroundTasks, user: User = Depends(user_dep),
@@ -585,9 +428,7 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
     def list_members(ws_id: str, user: User = Depends(user_dep), s: Session = Depends(session)):
         ws = workspace_for(s, user, ws_id)
         return {"members": members.listing(s, ws), "assignable": list(members.ASSIGNABLE),
-                "can_manage": access.can(s, user, ws, access.MEMBERS_MANAGE),
-                "org": {"id": ws.org.id, "name": ws.org.name, "access": ws.org_access} if ws.org else None,
-                "org_access_options": list(access.ORG_ACCESS)}
+                "can_manage": access.can(s, user, ws, access.MEMBERS_MANAGE)}
 
     @app.post("/api/workspaces/{ws_id}/members", status_code=201)
     def add_member(ws_id: str, body: MemberIn, user: User = Depends(user_dep),
@@ -869,40 +710,31 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
 
     # --- icons (icons.py, svgsafe.py) ----------------------------------------
 
-    def icon_error(exc: icons.IconError | library.LibraryError) -> HTTPException:
+    def icon_error(exc: icons.IconError) -> HTTPException:
         return HTTPException(exc.status, str(exc))
-
-    def icon_out(s: Session, user: User, i: Icon, names: dict[str, str] | None = None) -> dict:
-        return {**icons.out(i), **library.describe(s, user, i, names)}
 
     @app.get("/api/icons")
     def list_icons(user: User = Depends(user_dep), s: Session = Depends(session)):
         every = icons.builtins().values()
-        names = library.org_names(s, user)
         return {"builtin": [icons.out(b) for b in every if not icons.is_symbol(b["id"])],
                 "symbols": [icons.out(b) for b in every if icons.is_symbol(b["id"])],
-                "mine": [icon_out(s, user, i, names) for i in icons.mine(s, user)]}
+                "mine": [icons.out(i) for i in icons.mine(s, user)]}
 
     @app.post("/api/icons", status_code=201)
     def create_icon(body: IconIn, user: User = Depends(user_dep), s: Session = Depends(session)):
         try:
-            return icon_out(s, user, icons.create(s, user, body.name, body.svg, body.tinted,
-                                                  body.ports, body.source, body.org_id))
+            return icons.out(icons.create(s, user, body.name, body.svg, body.tinted, body.ports,
+                                          body.source))
         except icons.IconError as exc:
             raise icon_error(exc) from None
 
     @app.patch("/api/icons/{icon_id}")
     def patch_icon(icon_id: str, body: IconPatch, user: User = Depends(user_dep),
                    s: Session = Depends(session)):
-        fields = body.model_dump(exclude_unset=True)
         try:
             icon = icons.get_own(s, user, icon_id)
-            if "org_id" in fields:
-                library.share(s, user, icon, fields.pop("org_id"))
-            if fields:
-                icons.update(icon, fields)
-            return icon_out(s, user, icon)
-        except (icons.IconError, library.LibraryError) as exc:
+            return icons.out(icons.update(icon, body.model_dump(exclude_unset=True)))
+        except icons.IconError as exc:
             raise icon_error(exc) from None
 
     @app.delete("/api/icons/{icon_id}", status_code=204)
@@ -930,56 +762,41 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
     # After the .svg route, which would otherwise match here.
     @app.get("/api/icons/{icon_id}")
     def get_icon(icon_id: str, user: User = Depends(user_dep), s: Session = Depends(session)):
-        """An icon you can edit, with its creator drawing."""
+        """One of your icons with its creator drawing, to edit it."""
         try:
             icon = icons.get_own(s, user, icon_id)
         except icons.IconError as exc:
             raise icon_error(exc) from None
-        return {**icon_out(s, user, icon), "source": icon.source}
+        return {**icons.out(icon), "source": icon.source}
 
     # --- templates (templates.py) ------------------------------------------
 
-    def template_out(s: Session, user: User, t: Template, names: dict[str, str] | None = None) -> dict:
-        return {**templates.out(t), **library.describe(s, user, t, names)}
-
     @app.get("/api/templates")
     def list_templates(user: User = Depends(user_dep), s: Session = Depends(session)):
-        names = library.org_names(s, user)
         return {"templates": list(templates.BUILTIN.values())
-                + [template_out(s, user, t, names) for t in templates.mine(s, user)],
+                + [templates.out(t) for t in templates.mine(s, user)],
                 "default_page": templates.default_page_id(s, user)}
 
     @app.post("/api/templates", status_code=201)
     def create_template(body: TemplateIn, user: User = Depends(user_dep),
                         s: Session = Depends(session)):
         try:
-            return template_out(s, user, templates.create(s, user, body.name, body.kind, body.data,
-                                                          body.org_id))
+            return templates.out(templates.create(s, user, body.name, body.kind, body.data))
         except templates.TemplateError as exc:
             raise HTTPException(422, str(exc)) from None
 
     def own_template(s: Session, user: User, tid: str) -> Template:
-        """A template the user may change: their own, or an org's they author or admin."""
         t = s.get(Template, tid)
-        if t is None or not library.can_see(s, user, t):
+        if t is None or t.owner_id != user.id:
             raise HTTPException(404, "template not found")
-        if not library.can_edit(s, user, t):
-            raise HTTPException(403, "only its author or an org admin can change it")
         return t
 
     @app.patch("/api/templates/{tid}")
-    def patch_template(tid: str, body: TemplatePatch, user: User = Depends(user_dep),
-                       s: Session = Depends(session)):
+    def rename_template(tid: str, body: NameIn, user: User = Depends(user_dep),
+                        s: Session = Depends(session)):
         t = own_template(s, user, tid)
-        if body.name is not None:
-            t.name = body.name.strip()
-        if "org_id" in body.model_fields_set:
-            try:
-                library.share(s, user, t, body.org_id)
-            except library.LibraryError as exc:
-                raise HTTPException(exc.status, str(exc)) from None
-        t.updated_at = utcnow()
-        return template_out(s, user, t)
+        t.name, t.updated_at = body.name.strip(), utcnow()
+        return templates.out(t)
 
     @app.delete("/api/templates/{tid}", status_code=204)
     def delete_template(tid: str, user: User = Depends(user_dep), s: Session = Depends(session)):

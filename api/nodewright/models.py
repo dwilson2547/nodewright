@@ -73,49 +73,16 @@ class SessionToken(Base):
     user: Mapped[User] = relationship(back_populates="sessions")
 
 
-class Org(Base):
-    """An organisation (design §19): owns workspaces; its members get a role on each."""
-    __tablename__ = "orgs"
-
-    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
-    name: Mapped[str] = mapped_column(String(200), unique=True)
-    """Unique, because ORG_GROUPS (authentik group mapping) names orgs."""
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-
-
-class OrgMember(Base):
-    """A user's org role: admin (owner rights on every org workspace) or member.
-    source is "manual" (added in nodewright) or "authentik" (synced from a
-    group at sign-in, and only changed that way). Written by orgs.py."""
-    __tablename__ = "org_members"
-    __table_args__ = (UniqueConstraint("org_id", "user_id"),)
-
-    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
-    org_id: Mapped[str] = mapped_column(ForeignKey("orgs.id", ondelete="CASCADE"), index=True)
-    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    role: Mapped[str] = mapped_column(String(16))
-    source: Mapped[str] = mapped_column(String(16), default="manual")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-
-
 class Workspace(Base):
     __tablename__ = "workspaces"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     owner_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    """The owner of a personal workspace. On an org's workspace (org_id set) it
-    only records who last owned it and grants nothing."""
     name: Mapped[str] = mapped_column(String(200))
-    org_id: Mapped[str | None] = mapped_column(
-        ForeignKey("orgs.id", ondelete="RESTRICT"), nullable=True, index=True)
-    """The org that owns it; an org can't be deleted while it owns any."""
-    org_access: Mapped[str] = mapped_column(String(16), default="editor", server_default="editor")
-    """The role every org member gets here: none | viewer | editor."""
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     owner: Mapped[User] = relationship(back_populates="workspaces")
-    org: Mapped[Org | None] = relationship()
     canvases: Mapped[list["Canvas"]] = relationship(
         back_populates="workspace", cascade="all, delete-orphan", passive_deletes=True,
         order_by="Canvas.position")
@@ -217,16 +184,6 @@ class StyleGuide(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
-class OrgStyleGuide(Base):
-    """An org's style guide for agents (design §20): admins write it; agents
-    working in the org's workspaces get it with the user's own."""
-    __tablename__ = "org_style_guides"
-
-    org_id: Mapped[str] = mapped_column(ForeignKey("orgs.id", ondelete="CASCADE"), primary_key=True)
-    text: Mapped[str] = mapped_column(Text)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-
-
 class OAuthClient(Base):
     """An MCP client that registered itself (RFC 7591). `info` is the SDK's
     OAuthClientInformationFull as JSON, secret included: the SDK compares it
@@ -294,9 +251,6 @@ class Template(Base):
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     owner_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    """The author. With org_id set it's shared with that org (library.py, design §20)."""
-    org_id: Mapped[str | None] = mapped_column(
-        ForeignKey("orgs.id", ondelete="CASCADE"), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(200))
     kind: Mapped[str] = mapped_column(String(16))
     data: Mapped[dict] = mapped_column(Json)
@@ -391,9 +345,6 @@ class Icon(Base):
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     owner_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    """The author. With org_id set it's shared with that org (library.py, design §20)."""
-    org_id: Mapped[str | None] = mapped_column(
-        ForeignKey("orgs.id", ondelete="CASCADE"), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(100))
     svg: Mapped[str] = mapped_column(Text)
     tinted: Mapped[bool] = mapped_column(Boolean, default=True)

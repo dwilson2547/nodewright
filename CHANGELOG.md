@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.22.0 - 2026-10-12
+
+### Removed
+- Organisations, with everything that came with them in 0.20.0 and 0.21.0: the Orgs dialog,
+  org workspaces and org access, Share → Move, the authentik group mapping (`orgGroups`),
+  org-shared templates and icons, and org style guides. Sharing is back to how webdoc works:
+  your own workspaces, shared with named people as editors or viewers, plus read-only links.
+  No production data used them; migration `0009` drops their tables.
+
 ## 0.21.0 - 2026-10-12
 
 ### Added
