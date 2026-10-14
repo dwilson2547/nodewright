@@ -39,6 +39,13 @@ function download(name: string, text: string) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+type ImageScale = "auto" | "1" | "2" | "3" | "4";
+const IMAGE_SCALES: [ImageScale, string, string][] = [
+  ["auto", "Auto", "Text at least as large as the editor at 100%, sharp at 2x; lowered only if the drawing is too big"],
+  ["1", "1×", "100% zoom"], ["2", "2×", "100% zoom, twice the pixels"],
+  ["3", "3×", "100% zoom, three times the pixels"], ["4", "4×", "100% zoom, four times the pixels"],
+];
+
 function SignIn({ config, onDone }: { config: Config; onDone: () => void }) {
   const [error] = useState(signinError);
   const [name, setName] = useState("dev");
@@ -104,6 +111,8 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  const [imgScale, setImgScale] = useState<ImageScale>("auto");
+  const [imgBusy, setImgBusy] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [focus, setFocus] = useState<{ canvas: string; node: string } | null>(null);
   const linked = useRef<string | null>(linkedCanvas());
@@ -222,6 +231,38 @@ export default function App() {
     const doc = editor.current?.exportDoc();
     const t = tabs.find((x) => x.id === tabId);
     if (doc && t) download(t.name, JSON.stringify(doc, null, "\t"));
+  };
+
+  // Drawn server-side by the real editor in headless Chromium, from the saved
+  // copy, so pending edits are flushed first (as for the zip).
+  const exportImage = async () => {
+    const t = tabs.find((x) => x.id === tabId);
+    if (!t || imgBusy) return;
+    setImgBusy(true);
+    try {
+      await editor.current?.flush();
+      const r = await fetch(`/api/canvases/${t.id}/image?scale=${imgScale}`);
+      if (!r.ok) {
+        const body = await r.json().catch(() => null);
+        throw new Error(body?.detail ?? `Image export failed (HTTP ${r.status}).`);
+      }
+      const url = URL.createObjectURL(await r.blob());
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = (t.name.replace(/[^\w .-]/g, "").trim() || "canvas") + ".png";
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      const effective = Number(r.headers.get("X-Nodewright-Scale") ?? "1");
+      if (effective < 1) {
+        setError(`This tab is too big to export at 100%, so the image is at ${Math.round(effective * 100)}% and small text may be hard to read. Splitting it into linked tabs exports each one at full size.`);
+      } else if (imgScale !== "auto" && effective < Number(imgScale)) {
+        setError(`${imgScale}× would be too large an image for this tab, so it was exported at ${effective}×.`);
+      }
+    } catch (e) {
+      fail(e);
+    } finally {
+      setImgBusy(false);
+    }
   };
 
   // Save pending edits first, so the zip (built from the server's copy) has them.
@@ -344,6 +385,19 @@ export default function App() {
           {exportOpen && (
             <div className="sb-menu" role="menu">
               <button role="menuitem" onClick={exportTab} disabled={!tabId}>This tab (.canvas)</button>
+              {config?.image_export && <>
+                <button role="menuitem" onClick={() => void exportImage()} disabled={!tabId || imgBusy}
+                  title="The tab exactly as drawn here, as a PNG">
+                  {imgBusy ? "Rendering image…" : "This tab as image (.png)"}
+                </button>
+                <div className="scale-row" role="group" aria-label="Image scale">
+                  <span className="muted">Scale</span>
+                  {IMAGE_SCALES.map(([v, label, hint]) => (
+                    <button key={v} className={imgScale === v ? "on" : ""} aria-pressed={imgScale === v}
+                      title={hint} onClick={() => setImgScale(v)}>{label}</button>
+                  ))}
+                </div>
+              </>}
               <button role="menuitem" onClick={() => void exportWorkspace()}
                 title="Every tab and the files they show; unzipped, it opens as an Obsidian vault">
                 Whole workspace (.zip)

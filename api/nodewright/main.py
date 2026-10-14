@@ -266,7 +266,8 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
         return {"oidc": provider is not None, "dev_login": settings.dev_login_enabled,
                 "max_canvas_bytes": settings.max_canvas_bytes, "version": __version__,
                 "attachments": store is not None,
-                "max_attachment_bytes": settings.max_attachment_bytes}
+                "max_attachment_bytes": settings.max_attachment_bytes,
+                "image_export": bool(settings.browserless_url)}
 
     @app.get("/api/me")
     def me(user: User = Depends(user_dep)):
@@ -595,6 +596,41 @@ def create_app(settings: Settings | None = None, provider: oidc.Provider | None 
         return Response(json.dumps(c.data, indent="\t"), media_type="application/json",
                         headers={"Content-Disposition":
                                  f'attachment; filename="{_filename(c.name)}"'})
+
+    @app.get("/api/canvases/{canvas_id}/image")
+    def export_image(canvas_id: str, scale: str = "auto", user: User = Depends(user_dep),
+                     s: Session = Depends(session)):
+        """The tab as a PNG, drawn by the real editor in headless Chromium (render.py).
+        scale: auto (readable: 100% zoom at 2x, lowered only to fit) or 1-4."""
+        if not settings.browserless_url:
+            raise HTTPException(404, "image export is not set up on this server")
+        if scale == "auto":
+            wanted = None
+        else:
+            try:
+                wanted = float(scale)
+            except ValueError:
+                wanted = 0.0
+            if wanted not in render.EXPORT_SCALES:
+                raise HTTPException(422, "scale must be auto, 1, 2, 3 or 4")
+        c = canvas_for(s, user, canvas_id)
+        size, ratio, effective = render.export_plan(c.data, wanted)
+        name, ws_id = c.name, c.workspace_id
+        token = tickets.issue(canvas_id, ws_id)
+        try:
+            url = render.page_url(settings.render_base_url or settings.public_url,
+                                  canvas_id, token, None, export=True)
+            png = render.screenshot(settings.browserless_url, url, size, timeout=90.0,
+                                    ratio=ratio)
+        except render.RenderError as exc:
+            log.warning("image export failed: %s", exc)
+            raise HTTPException(502, "the renderer failed; try again") from None
+        finally:
+            tickets.revoke(token)
+        filename = _filename(name)[: -len(".canvas")] + ".png"
+        return Response(png, media_type="image/png", headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "X-Nodewright-Scale": f"{effective:.2f}"})
 
     # --- edit lease ----------------------------------------------------------
 

@@ -1,7 +1,8 @@
-// /render?canvas=<id>&t=<ticket>[&focus=a,b]: one canvas, read-only and
-// chrome-free, for the headless browser behind the render_canvas MCP tool
-// (api/nodewright/render.py). Marks #nw-render[data-ready] once everything,
-// images included, has been drawn and fitted.
+// /render?canvas=<id>&t=<ticket>[&focus=a,b][&export=1]: one canvas, read-only
+// and chrome-free, for the headless browser behind the render_canvas MCP tool
+// and Export > Image (api/nodewright/render.py). Marks #nw-render[data-ready]
+// once everything, images included, has been drawn and fitted. export=1 draws
+// at 100% with a fixed margin: the server sized the window to the drawing.
 import { useEffect, useState } from "react";
 import { ConnectionMode, getNodesBounds, getViewportForBounds, ReactFlow, ReactFlowProvider, useReactFlow } from "@xyflow/react";
 import type { CanvasMeta } from "./api";
@@ -16,6 +17,8 @@ const q = new URLSearchParams(location.search);
 const canvasId = q.get("canvas") ?? "";
 const ticket = q.get("t") ?? "";
 const focus = (q.get("focus") ?? "").split(",").filter(Boolean);
+const exporting = q.get("export") === "1";
+const PAD = 40; // render.PAD
 
 
 type Loaded = { nodes: CNode[]; edges: CEdge[]; tabs: CanvasMeta[]; colorByNet: boolean };
@@ -49,7 +52,18 @@ function Shot({ doc }: { doc: Loaded }) {
       const known = new Set(doc.nodes.map((n) => n.id));
       const only = focus.filter((id) => known.has(id));
       const nodes = flow.getNodes().filter((n) => !only.length || only.includes(n.id));
-      if (nodes.length) {
+      if (nodes.length && exporting) {
+        // Zoom below 1 only if the server had to shrink the window (a drawing
+        // too big to export at 100%); centred, in case measured sizes differ.
+        const b = getNodesBounds(nodes);
+        const w = window.innerWidth - 2 * PAD, h = window.innerHeight - 2 * PAD;
+        const zoom = Math.min(1, w / b.width, h / b.height);
+        await flow.setViewport({
+          x: PAD + (w - b.width * zoom) / 2 - b.x * zoom,
+          y: PAD + (h - b.height * zoom) / 2 - b.y * zoom,
+          zoom,
+        });
+      } else if (nodes.length) {
         const vp = getViewportForBounds(getNodesBounds(nodes), window.innerWidth, window.innerHeight, 0.05, 1, 0.05);
         await flow.setViewport(vp);
       }
@@ -72,7 +86,7 @@ function Shot({ doc }: { doc: Loaded }) {
         elementsSelectable={false}
         edgesReconnectable={false}
         connectionMode={ConnectionMode.Loose}
-        minZoom={0.05}
+        minZoom={0.01}
         maxZoom={1}
         colorMode="light"
         proOptions={{ hideAttribution: true }}

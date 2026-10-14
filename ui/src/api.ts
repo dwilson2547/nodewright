@@ -40,6 +40,7 @@ export type Config = {
   version: string;
   attachments: boolean;
   max_attachment_bytes: number;
+  image_export: boolean;
 };
 export type Attachment = {
   id: string; name: string; content_type: string; size: number; image: boolean; file: string; url: string;

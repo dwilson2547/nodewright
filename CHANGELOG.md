@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.23.0 - 2026-10-14
+
+### Added
+- **Export → This tab as image (.png):** the tab exactly as the editor draws it, rendered by the
+  same headless Chromium as `render_canvas`. Scale **Auto** (the default) draws at 100% zoom at 2×
+  pixel density, so text is at least as large as in the editor and sharp; it steps down to 1.5× or
+  1× only to stay inside Chromium's 16384 px side limit and a 60 MP cap. 1×–4× are also offered and
+  lowered the same way when too big. Only a drawing too large for 100% even at 1× is zoomed out,
+  and the editor says so. Offered only when `BROWSERLESS_URL` is set.
+
+### Fixed
+- `render_canvas` failed on every canvas with "POST Body validation failed: must NOT have
+  additional properties" since the shared browserless moved to v2 (scrape-stack, 2026-10-13):
+  the screenshot request used v1's `waitFor`. It now sends v2's `waitForSelector`.
+
 ## 0.22.0 - 2026-10-12
 
 ### Removed

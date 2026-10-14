@@ -27,13 +27,13 @@ def rig(settings, monkeypatch):
     browser = TestClient(app)  # no cookie, like the headless browser
     shots = []
 
-    def fake_screenshot(base, url, size, timeout=30.0):
+    def fake_screenshot(base, url, size, timeout=30.0, ratio=1.0):
         parts = urlsplit(url)
         q = {k: v[0] for k, v in parse_qs(parts.query).items()}
         assert base == "http://browserless:3000"
         assert url.startswith("http://nodewright.internal/render?")
         page = browser.get(f"/api/render/{q['canvas']}", params={"t": q["t"]})
-        shots.append({"q": q, "size": size, "page": page})
+        shots.append({"q": q, "size": size, "page": page, "ratio": ratio})
         return FAKE_PNG
 
     monkeypatch.setattr(render, "screenshot", fake_screenshot)
@@ -121,3 +121,74 @@ def test_viewport_sizes():
     assert render.viewport({"nodes": [n("a", 0, 0, 800, 600)]}) == (880, 680)
     assert render.viewport({"nodes": [n("a", 0, 0, 160, 60), n("b", 5000, 5000, 160, 60)]},
                            ["a"]) == (render.MIN_W, render.MIN_H)
+
+
+def test_screenshot_sends_browserless_v2_body(monkeypatch):
+    # v2 400s on unknown keys ("must NOT have additional properties"); v1's
+    # `waitFor` broke render_canvas when the shared browserless moved to v2.
+    sent = {}
+
+    class R:
+        status_code, content, text = 200, FAKE_PNG, ""
+
+    def fake_post(url, json, timeout):
+        sent.update(url=url, body=json)
+        return R()
+
+    monkeypatch.setattr(render.httpx, "post", fake_post)
+    assert render.screenshot("http://bl:3000/", "http://nw/render?x", (800, 600), ratio=2.0) == FAKE_PNG
+    body = sent["body"]
+    assert sent["url"] == "http://bl:3000/screenshot"
+    assert set(body) == {"url", "viewport", "gotoOptions", "waitForSelector", "options"}
+    assert body["waitForSelector"]["selector"] == render.READY
+    assert body["viewport"] == {"width": 800, "height": 600, "deviceScaleFactor": 2.0}
+
+
+def test_export_plan_keeps_text_readable():
+    n = lambda w, h: {"nodes": [{"id": "a", "x": 0, "y": 0, "width": w, "height": h}]}  # noqa: E731
+    # Auto: 100% zoom at 2x when it fits.
+    assert render.export_plan(n(2920, 2390), None) == ((3000, 2470), 2.0, 2.0)
+    # Explicit scales are honoured when they fit...
+    assert render.export_plan(n(920, 520), 4.0) == ((1000, 600), 4.0, 4.0)
+    # ...and lowered to the largest that does when not (pixel cap).
+    size, ratio, eff = render.export_plan(n(4920, 3920), 4.0)  # 20 MP: 2x is 80, 1.5x is 45
+    assert size == (5000, 4000) and ratio == eff == 1.5
+    # Auto steps down but stays at 100% while 1x fits.
+    assert render.export_plan(n(9920, 4920), None)[1:] == (1.0, 1.0)
+    # Only a drawing too big for 1x goes below 100%, within Chromium's limits.
+    (w, h), ratio, eff = render.export_plan(n(30000, 2000), None)
+    assert ratio == 1.0 and eff < 1 and w <= render.MAX_EXPORT_SIDE
+    assert w * h <= render.MAX_EXPORT_PIXELS
+    # An empty tab still gets a sane window.
+    assert render.export_plan({"nodes": []}, None)[0] == (render.MIN_W, render.MIN_H)
+
+
+def test_image_export_endpoint(rig):
+    app, web, browser, shots, call = rig
+    ws, tab = first_canvas(web)
+    doc = {"nodes": [{"id": "a", "type": "text", "text": "A", "x": 0, "y": 0, "width": 920,
+                      "height": 520}], "edges": []}
+    assert web.put(f"/api/canvases/{tab['id']}", json={"base_revision": 1, "data": doc},
+                   headers=H).status_code == 200
+    assert web.get("/api/config").json()["image_export"] is True
+    r = web.get(f"/api/canvases/{tab['id']}/image")
+    assert r.status_code == 200 and r.content == FAKE_PNG
+    assert r.headers["content-type"] == "image/png"
+    assert r.headers["content-disposition"].endswith('.png"')
+    assert r.headers["x-nodewright-scale"] == "2.00"
+    shot = shots[-1]
+    assert shot["q"]["export"] == "1" and shot["size"] == (1000, 600) and shot["ratio"] == 2.0
+    assert shot["page"].json()["data"] == doc
+    assert browser.get(f"/api/render/{tab['id']}", params={"t": shot["q"]["t"]}).status_code == 404
+    assert web.get(f"/api/canvases/{tab['id']}/image", params={"scale": "3"}).headers[
+        "x-nodewright-scale"] == "3.00"
+    assert web.get(f"/api/canvases/{tab['id']}/image", params={"scale": "7"}).status_code == 422
+    assert web.get("/api/canvases/missing/image").status_code == 404
+    assert browser.get(f"/api/canvases/{tab['id']}/image").status_code == 401
+
+
+def test_image_export_off_without_browserless(client):
+    assert client.get("/api/config").json()["image_export"] is False
+    ws = client.get("/api/workspaces").json()
+    tab_id = client.get(f"/api/workspaces/{ws[0]['id']}/canvases").json()[0]["id"] if ws else "x"
+    assert client.get(f"/api/canvases/{tab_id}/image").status_code == 404
