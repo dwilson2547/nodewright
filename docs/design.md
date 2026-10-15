@@ -248,8 +248,8 @@ Resolved 2026-10-10 (✅ user):
 - **Read-only share links** are rendered by nodewright itself (same renderer as the editor, so style
   extensions and cross-canvas links work), behind an unguessable, revocable token. Not via
   `meta/canvas-viewer`: its CSP (`connect-src 'self'`) only loads files from its own origin and it
-  does not understand the §3.2 extensions. canvas-viewer stays the simple tool for loose `.canvas`
-  files. Built in 0.7.0 (`api/nodewright/shares.py`, `ui/src/Share.tsx`): a link is to one tab, or
+  does not understand the §3.2 extensions. (canvas-viewer was retired 2026-10-15; nodewright's PNG
+  export covered its remaining use.) Built in 0.7.0 (`api/nodewright/shares.py`, `ui/src/Share.tsx`): a link is to one tab, or
   with `all_tabs` to every tab of its workspace so tab links work; only owners (`workspace.manage`)
   create, list or revoke links; revoking deletes the row. Tokens are stored as is so the link can be
   copied again (they guard nothing outside the same database). Attachments are served by token too,

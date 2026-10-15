@@ -69,5 +69,4 @@ Secrets (`nodewright-db`, `nodewright-oidc`, `authentik-nodewright-oidc`,
 `nodewright-bucket-credentials`) are hand-applied; template in
 `infra/cluster-config/example-secrets/nodewright/secret.yml`.
 
-Successor in spirit to `meta/canvas-viewer`, which stays as the zero-dependency, read-only share
-viewer; nodewright does not replace or modify it.
+Successor to `meta/canvas-viewer`, which was retired on 2026-10-15 once nodewright had PNG export.
