@@ -23,6 +23,7 @@ spec:
         runAsUser: 10001
         seccompProfile:
           type: RuntimeDefault
+      automountServiceAccountToken: false
       containers:
         - name: nodewright
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
